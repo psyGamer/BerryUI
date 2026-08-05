@@ -1,3 +1,7 @@
 <Solution>
-  <Project Path="BerryUI.csproj" />
+    <Project Path="BerryUI/BerryUI.csproj" />
+    
+    <Folder Name="/Backends/">
+        <Project Path="BerryUI.FNA/BerryUI.FNA.csproj" />
+    </Folder>
 </Solution>

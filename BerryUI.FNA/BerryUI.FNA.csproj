@@ -8,6 +8,8 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\BerryUI\BerryUI.csproj"/>
+
         <ProjectReference Include="FNA\FNA.Core.csproj"/>
         <Compile Remove="FNA\**"/>
         <Content Include="runtimes\**" CopyToOutputDirectory="PreserveNewest"/>
