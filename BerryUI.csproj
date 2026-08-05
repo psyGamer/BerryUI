@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk" InitialTargets="ValidateFNALibs">
 
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
@@ -12,5 +12,11 @@
         <Compile Remove="FNA\**"/>
         <Content Include="runtimes\**" CopyToOutputDirectory="PreserveNewest"/>
     </ItemGroup>
+
+    <Target Name="ValidateFNALibs">
+        <Error
+            Condition="!Exists('runtimes')"
+            Text="'runtimes' directory not found! Run './fetch-fnalibs.sh' to download the latest native libraries."/>
+    </Target>
 
 </Project>
