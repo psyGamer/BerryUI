@@ -9,6 +9,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\BerryUI\BerryUI.csproj"/>
+        <Compile Include="..\BerryUI\GlobalUsings.cs"/>
 
         <ProjectReference Include="FNA\FNA.Core.csproj"/>
         <Compile Remove="FNA\**"/>

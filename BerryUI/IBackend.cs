@@ -1,19 +1,35 @@
+using BerryUI.Render;
 using BerryUI.Util;
 using System;
 
 namespace BerryUI;
 
-/// "Opaque" interface representing the platform backend
 public interface IBackend : IDisposable {
-    /// Current width of the window.
-    int Width { get; }
+    interface IWindow : IDisposable {
+        /// Handle which uniquely identifies this window inside the backend.
+        Window.Handle Handle { get; }
 
-    /// Current height of the window.
-    int Height { get; }
+        /// Minimum size for the window, which the user can't go below.
+        USize MinimumSize { get; set; }
 
-    /// Minimum size for the below, which the user can't go below.
-    Point MinimumWindowSize { get; set; }
+        /// Widget which will be used as the base for rendering the window's content.
+        Widget? RootWidget { get; set; }
+    }
 
-    /// Hands the control-flow execution over to the backend.
-    void Run(App app);
+    readonly record struct WindowCallbacks(WindowCallbacks.OnResizeFunc OnResize) {
+        public delegate void OnResizeFunc(uint width, uint height);
+    }
+
+    /// Creates a new window alongside the existing main window.
+    /// The first call will create the "main window". Closing it will cause the application to exit.
+    IWindow CreateWindow(uint width, uint height, WindowCallbacks callbacks);
+    /// Destroys a previously created window.
+    void DestroyWindow(Window.Handle handle);
+    /// Retrieves the window associated with the handle from the backend.
+    IWindow GetWindow(Window.Handle handle);
+
+    /// Creates a new texture.
+    Texture.Handle CreateTexture(uint width, uint height, Color? fillColor);
+    /// Destroys a previously created texture.
+    void DestroyTexture(Texture.Handle handle);
 }
