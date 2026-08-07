@@ -14,6 +14,9 @@
         <ProjectReference Include="FNA\FNA.Core.csproj"/>
         <Compile Remove="FNA\**"/>
         <Content Include="runtimes\**" CopyToOutputDirectory="PreserveNewest"/>
+
+        <ProjectReference Include="FontStashSharp\src\XNA\FontStashSharp.FNA.Core.csproj"/>
+        <Compile Remove="FontStashSharp\**"/>
     </ItemGroup>
 
     <Target Name="ValidateFNALibs">

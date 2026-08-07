@@ -12,7 +12,7 @@ mkdir -p runtimes/win-x86 runtimes/win-x64 runtimes/linux-x64 runtimes/osx-x64
 cp -r fnalibs-win-linux/x86 runtimes/win-x86/native
 cp -r fnalibs-win-linux/x64 runtimes/win-x64/native
 cp -r fnalibs-win-linux/lib64 runtimes/linux-x64/native
-cp -r fnalibs-osx/osx runtimes/osx/native
+cp -r fnalibs-osx/osx runtimes/osx-x64/native
 
 rm -rf fnalibs-win-linux.zip fnalibs-win-linux
 rm -rf fnalibs-osx.zip fnalibs-osx 
