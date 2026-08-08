@@ -1,0 +1,11 @@
+global using unsafe FT_Driver = BerryUI.FNA.FreeType.FT_DriverRec_*;
+global using unsafe FT_Face_Internal = BerryUI.FNA.FreeType.FT_Face_InternalRec_*;
+global using unsafe FT_Library = BerryUI.FNA.FreeType.FT_LibraryRec_*;
+global using unsafe FT_Memory = BerryUI.FNA.FreeType.FT_MemoryRec_*;
+global using unsafe FT_Module = BerryUI.FNA.FreeType.FT_ModuleRec_*;
+global using unsafe FT_Raster = BerryUI.FNA.FreeType.FT_RasterRec_*;
+global using unsafe FT_Renderer = BerryUI.FNA.FreeType.FT_RendererRec_*;
+global using unsafe FT_Size_Internal = BerryUI.FNA.FreeType.FT_Size_InternalRec_*;
+global using unsafe FT_Slot_Internal = BerryUI.FNA.FreeType.FT_Slot_InternalRec_*;
+global using unsafe FT_SubGlyph = BerryUI.FNA.FreeType.FT_SubGlyphRec_*;
+global using unsafe FT_Face = BerryUI.FNA.FreeType.FT_FaceRec*;

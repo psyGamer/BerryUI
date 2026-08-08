@@ -1,89 +1,24 @@
 using BerryUI.Render;
+using BerryUI.Util;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using SDL2;
 using System;
-using System.Collections.Generic;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Text;
+using System.Linq;
 using BerryColor = BerryUI.Util.Color;
 using BerryWindow = BerryUI.Render.Window;
 using BerryTexture = BerryUI.Render.Texture;
+using BerryFontFamily = BerryUI.Render.FontFamily;
+using BerryFontFace = BerryUI.Render.FontFace;
+using FNAColor = Microsoft.Xna.Framework.Color;
 
 namespace BerryUI.FNA;
 
 /// Backend for running BerryUI as an FNA game
 public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
-    private sealed class FNAWindow : IBackend.IWindow {
-        public readonly IntPtr Pointer;
-        public readonly uint ID;
-        public readonly CommandBuffer CommandBuffer = new(BerryTexture.Screen);
-
-        private readonly IBackend.WindowCallbacks callbacks;
-        private int prevWidth, prevHeight;
-
-        public BerryWindow.Handle Handle { get; }
-
-        private USize minimumSize;
-        public USize MinimumSize {
-            get => minimumSize;
-            set {
-                minimumSize = value;
-                SDL.SDL_SetWindowMinimumSize(Pointer, (int)value.Width, (int)value.Height);
-            }
-        }
-
-        public Widget? RootWidget { get; set; }
-        public bool NeedsClear;
-
-        public FNAWindow(uint width, uint height, IBackend.WindowCallbacks callbacks, BerryWindow.Handle handle) {
-            Pointer = SDL.SDL_CreateWindow(
-                "Extra Window",
-                SDL.SDL_WINDOWPOS_CENTERED,
-                SDL.SDL_WINDOWPOS_CENTERED,
-                (int)width,
-                (int)height,
-                // SDL_WINDOW_VULKAN just loads libvulkan, so we can always set it
-                SDL.SDL_WindowFlags.SDL_WINDOW_VULKAN |
-                SDL.SDL_WindowFlags.SDL_WINDOW_SHOWN
-            );
-            ID = SDL.SDL_GetWindowID(Pointer);
-
-            SDL.SDL_GetWindowMinimumSize(Pointer, out int minW, out int minH);
-            minimumSize = new USize((uint)minW, (uint)minH);
-
-            this.callbacks = callbacks;
-            Handle = handle;
-        }
-
-        public void Update() {
-            SDL.SDL_GetWindowSize(Pointer, out int currWidth, out int currHeight);
-            if (prevWidth != currWidth || prevHeight != currHeight) {
-                prevWidth = currWidth;
-                prevHeight = currHeight;
-
-                callbacks.OnResize((uint)currWidth, (uint)currHeight);
-                RootWidget?.InvalidateLayoutAndDraw();
-                NeedsClear = true;
-            }
-
-            if (RootWidget is { } root) {
-                UI.Update(root);
-
-                CommandBuffer.Reset();
-                UI.Draw(root, CommandBuffer);
-            }
-        }
-
-        public void Dispose() {
-            UI.Backend.DestroyWindow(Handle);
-        }
-    }
-
     private const uint MainWindowHandle = uint.MaxValue;
 
-    public BerryWindow.Handle Handle => new(MainWindowHandle);
+    public ResourceHandle<BerryWindow> Handle => new(MainWindowHandle);
 
     private USize minimumSize;
     public USize MinimumSize {
@@ -97,19 +32,21 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
     public Widget? RootWidget { get; set; }
 
     private readonly GraphicsDeviceManager graphics;
+
+    // ReSharper disable once PrivateFieldCanBeConvertedToLocalVariable
     private readonly SDL.SDL_EventFilter currEventFilter;
     private readonly SDL.SDL_EventFilter? prevEventFilter;
 
     private SpriteBatch batch = null!;
     private readonly CommandBuffer commandBuffer = new(BerryTexture.Screen);
 
-    private readonly List<FNAWindow?> windowStorage = new(capacity: 8);
-    private int prevWindowIndex = int.MinValue;
-
-    private readonly List<Texture2D?> textureStorage = new(capacity: 128);
-    private int prevTextureIndex = -1;
+    private readonly ResourcePool<BerryWindow, FNAWindow> windowPool = new();
+    private readonly ResourcePool<BerryTexture, FNATexture> texturePool = new();
+    private readonly ResourcePool<BerryFontFamily, FNAFontFamily> fontFamilyPool = new();
+    private readonly ResourcePool<BerryFontFace, FNAFontFace> fontFacePool = new();
 
     private int prevWidth, prevHeight;
+    private bool initializedMainWindow;
     private bool needsClear;
 
     private IBackend.WindowCallbacks mainWindowCallbacks;
@@ -142,15 +79,9 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
                 return 0;
             }
 
-            foreach (var extraWindow in windowStorage) {
-                if (extraWindow == null) {
-                    continue;
-                }
-
-                if (evt->window.windowID == extraWindow.ID) {
-                    // Filter these out so Game doesn't get weird
-                    return 0;
-                }
+            // Filter these out so Game doesn't get weird
+            if (windowPool.Any(win => evt->window.windowID == win.ID)) {
+                return 0;
             }
         }
 
@@ -185,11 +116,12 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
             UI.Update(root);
 
             commandBuffer.Reset();
+            root.InvalidateDraw();
             UI.Draw(root, commandBuffer);
         }
 
-        foreach (var extraWindow in windowStorage) {
-            extraWindow?.Update();
+        foreach (var window in windowPool) {
+            window.Update();
         }
     }
 
@@ -197,15 +129,11 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
         // Get the largest width/height of all windows, use as backbuffer size
         var bounds = Window.ClientBounds;
 
-        foreach (var extraWindow in windowStorage) {
-            if (extraWindow == null) {
-                continue;
-            }
+        foreach (var window in windowPool) {
+            SDL.SDL_GetWindowSize(window.Pointer, out int windowWidth, out int windowHeight);
 
-            SDL.SDL_GetWindowSize(extraWindow.Pointer, out int wx, out int wy);
-
-            bounds.Width = Math.Max(bounds.Width, wx);
-            bounds.Height = Math.Max(bounds.Height, wy);
+            bounds.Width = Math.Max(bounds.Width, windowWidth);
+            bounds.Height = Math.Max(bounds.Height, windowHeight);
         }
 
         /* Note two details:
@@ -226,27 +154,27 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
     protected override void Draw(GameTime gameTime) {
         ValidateBackBuffer();
 
-        foreach (var extraWindow in windowStorage) {
-            if (extraWindow == null) {
-                continue;
-            }
-
-            SDL.SDL_GetWindowSize(extraWindow.Pointer, out int windowWidth, out int windowHeight);
+        foreach (var window in windowPool) {
+            SDL.SDL_GetWindowSize(window.Pointer, out int windowWidth, out int windowHeight);
 
             graphics.GraphicsDevice.Viewport = new Viewport(0, 0, windowWidth, windowHeight);
-            DrawCommandBuffer(extraWindow.CommandBuffer);
+            if (window.NeedsClear) {
+                window.NeedsClear = false;
+                GraphicsDevice.Clear(FNAColor.Black);
+            }
+            DrawCommandBuffer(window.CommandBuffer);
             graphics.GraphicsDevice.Present(
                 new Rectangle(0, 0, windowWidth, windowHeight),
                 null,
-                extraWindow.Pointer
+                window.Pointer
             );
         }
 
         var bounds = Window.ClientBounds;
         graphics.GraphicsDevice.Viewport = new Viewport(0, 0, bounds.Width, bounds.Height);
         if (needsClear) {
-            GraphicsDevice.Clear(Color.Black);
             needsClear = false;
+            GraphicsDevice.Clear(FNAColor.Black);
         }
 
         DrawCommandBuffer(commandBuffer);
@@ -263,12 +191,19 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
     }
 
     private void DrawCommandBuffer(CommandBuffer buf) {
-        int spriteIdx = 0;
+        // Process text
+        foreach (var text in buf.TextCommands) {
+            var face = fontFacePool[text.Font];
+            face.RegisterText(text.Text);
+        }
+        foreach (var face in fontFacePool) {
+            face.StoreNew(texturePool);
+        }
 
         batch.Begin(
             SpriteSortMode.Deferred,
             BlendState.AlphaBlend,
-            SamplerState.LinearClamp,
+            SamplerState.PointClamp,
             DepthStencilState.None,
             new RasterizerState {
                 CullMode = CullMode.CullCounterClockwiseFace,
@@ -276,15 +211,22 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
                 MultiSampleAntiAlias = false,
             });
 
+        int spriteIdx = 0, textIdx = 0;
         foreach (var type in buf.CommandTypes) {
             switch (type) {
                 case CmdType.Sprite:
                     var sprite = buf.SpriteCommands[spriteIdx++];
                     batch.Draw(
-                        texture: textureStorage[(int)sprite.Texture.BackendHandle.Value]!,
+                        texture: texturePool[sprite.Texture].Texture,
                         destinationRectangle: sprite.Destination.ToFNA(),
                         sourceRectangle: sprite.Source.ToFNA(),
                         color: sprite.Color.ToFNA());
+                    break;
+
+                case CmdType.Text:
+                    var text = buf.TextCommands[textIdx++];
+                    var face = fontFacePool[text.Font];
+                    face.RenderText(text.Text, batch, text.Position.ToVector2(), texturePool);
                     break;
             }
         }
@@ -292,95 +234,67 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
         batch.End();
     }
 
-    public IBackend.IWindow CreateWindow(uint width, uint height, IBackend.WindowCallbacks callbacks) {
-        if (prevWindowIndex == int.MinValue) {
-            // This is the first window being allocated, assign it to the "main window"
-            prevWindowIndex = -1;
+    public ResourceHandle<BerryWindow> CreateWindow(uint width, uint height, IBackend.WindowCallbacks callbacks) {
+        // The first allocated window is the "main window"
+        if (!initializedMainWindow) {
+            initializedMainWindow = true;
             mainWindowCallbacks = callbacks;
 
             graphics.PreferredBackBufferWidth = (int)width;
             graphics.PreferredBackBufferHeight = (int)height;
-
-            return this;
+            return new ResourceHandle<BerryWindow>(MainWindowHandle);
         }
 
-        // Search for a free slot
-        prevWindowIndex++;
-        for (; prevWindowIndex < windowStorage.Count; prevWindowIndex++) {
-            if (windowStorage[prevWindowIndex] is null) {
-                var window = new FNAWindow(width, height, callbacks, new((uint)prevWindowIndex));
-                windowStorage[prevWindowIndex] = window;
-                return window;
-            }
-        }
-
-        // Allocate a new slot
-        {
-            var window = new FNAWindow(width, height, callbacks, new((uint)prevWindowIndex));
-            windowStorage.Add(window);
-            return window;
-        }
-
+        var window = new FNAWindow(width, height, callbacks);
+        window.Handle = windowPool.Allocate(window);
+        return window.Handle;
     }
-    public void DestroyWindow(BerryWindow.Handle handle) {
+    public void DestroyWindow(ResourceHandle<BerryWindow> handle) {
         if (handle.Value == MainWindowHandle) {
             Exit();
             return;
         }
 
-        prevWindowIndex = (int)handle.Value;
-        var window = windowStorage[prevWindowIndex]!;
-        windowStorage[prevWindowIndex] = null;
-
-        SDL.SDL_DestroyWindow(window.Pointer);
+        windowPool.Free(handle);
     }
-    public IBackend.IWindow GetWindow(BerryWindow.Handle handle) {
+    public IBackend.IWindow GetWindow(ResourceHandle<BerryWindow> handle) {
         if (handle.Value == MainWindowHandle) {
             return this;
         }
 
-        return windowStorage[(int)handle.Value]!;
+        return windowPool[handle];
     }
 
-    public BerryTexture.Handle CreateTexture(uint width, uint height, BerryColor? fillColor) {
-        var texture = new Texture2D(graphics.GraphicsDevice, (int)width, (int)height, false, SurfaceFormat.Color);
-        if (fillColor.HasValue) {
-            unsafe {
-                int dataLen = (int)(width * height);
-                int dataSize = dataLen * Unsafe.SizeOf<BerryColor>();
-
-                nint dataPtr = Marshal.AllocHGlobal(dataSize);
-                var dataSpan = new Span<BerryColor>((void*)dataPtr, dataLen);
-                dataSpan.Fill(fillColor.Value);
-
-                texture.SetDataPointerEXT(0, null, dataPtr, dataSize);
-
-                Marshal.FreeHGlobal(dataPtr);
-            }
-        }
-
-        return StoreTexture(texture);
+    public ResourceHandle<BerryTexture> CreateTexture(uint width, uint height, BerryColor? fillColor) {
+        var texture = new FNATexture(graphics.GraphicsDevice, (int)width, (int)height, fillColor);
+        texture.Handle = texturePool.Allocate(texture);
+        return texture.Handle;
     }
-    public void DestroyTexture(BerryTexture.Handle handle) {
-        prevTextureIndex = (int)handle.Value;
-        var texture = textureStorage[prevTextureIndex]!;
-        textureStorage[prevTextureIndex] = null;
-
-        texture.Dispose();
+    public void DestroyTexture(ResourceHandle<BerryTexture> handle) {
+        texturePool.Free(handle);
     }
 
-    private BerryTexture.Handle StoreTexture(Texture2D texture) {
-        // Search for a free slot
-        prevTextureIndex++;
-        for (; prevTextureIndex < textureStorage.Count; prevTextureIndex++) {
-            if (textureStorage[prevTextureIndex] is null) {
-                textureStorage[prevTextureIndex] = texture;
-                return new BerryTexture.Handle((uint)prevTextureIndex);
-            }
-        }
+    public ResourceHandle<BerryFontFamily> CreateFontFamily(byte[] data) {
+        var fontFamily = new FNAFontFamily(data);
+        fontFamily.Handle = fontFamilyPool.Allocate(fontFamily);
+        return fontFamily.Handle;
+    }
+    public void DestroyFontFamily(ResourceHandle<BerryFontFamily> handle) {
+        fontFamilyPool.Free(handle);
+    }
+    public IBackend.IFontFamily GetFontFamily(ResourceHandle<BerryFontFamily> handle) {
+        return fontFamilyPool[handle];
+    }
 
-        // Allocate a new slot
-        textureStorage.Add(texture);
-        return new BerryTexture.Handle((uint)prevTextureIndex);
+    public ResourceHandle<BerryFontFace> CreateFontFace(ResourceHandle<BerryFontFamily> family, float size) {
+        var fontFace = new FNAFontFace(fontFamilyPool[family], size);
+        fontFace.Handle = fontFacePool.Allocate(fontFace);
+        return fontFace.Handle;
+    }
+    public void DestroyFontFace(ResourceHandle<BerryFontFace> handle) {
+        fontFacePool.Free(handle);
+    }
+    public IBackend.IFontFace GetFontFace(ResourceHandle<BerryFontFace> handle) {
+        return fontFacePool[handle];
     }
 }

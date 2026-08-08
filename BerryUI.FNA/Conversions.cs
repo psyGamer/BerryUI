@@ -4,6 +4,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using FNAColor = Microsoft.Xna.Framework.Color;
 using BerryColor = BerryUI.Util.Color;
+using Vector2 = Microsoft.Xna.Framework.Vector2;
 
 namespace BerryUI.FNA;
 
@@ -20,5 +21,11 @@ public static class Conversions {
     public static FNAColor ToFNA(this BerryColor color) {
         // They have the same memory representation
         return Unsafe.BitCast<BerryColor, FNAColor>(color);
+    }
+
+    public static Vector2 ToVector2<T>(this Point<T> point) where T : INumber<T> {
+        return new Vector2(
+            float.CreateChecked(point.X),
+            float.CreateChecked(point.Y));
     }
 }

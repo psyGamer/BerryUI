@@ -8,21 +8,46 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <Compile Remove="**"/>
+        <Compile Include=".\*.cs"/>
+        <Compile Include=".\FreeType\*.cs"/>
+
         <ProjectReference Include="..\BerryUI\BerryUI.csproj"/>
         <Compile Include="..\BerryUI\GlobalUsings.cs"/>
 
         <ProjectReference Include="FNA\FNA.Core.csproj"/>
-        <Compile Remove="FNA\**"/>
         <Content Include="runtimes\**" CopyToOutputDirectory="PreserveNewest"/>
-
-        <ProjectReference Include="FontStashSharp\src\XNA\FontStashSharp.FNA.Core.csproj"/>
-        <Compile Remove="FontStashSharp\**"/>
     </ItemGroup>
 
     <Target Name="ValidateFNALibs">
         <Error
             Condition="!Exists('runtimes')"
             Text="'runtimes' directory not found! Run './fetch-fnalibs.sh' to download the latest native libraries."/>
+    </Target>
+
+    <PropertyGroup>
+        <!-- Zig doesn't need separate -musl variants; it's libc is fully static -->
+        <_ZigToolsetPackageName>Vezel.Zig.Toolsets.$([System.String]::Copy($(NETCoreSdkPortableRuntimeIdentifier)).Replace('-musl', ''))</_ZigToolsetPackageName>
+        <_ZigToolsetPackageVersion>0.16.0.2</_ZigToolsetPackageVersion>
+
+        <_ZigToolsetPackageNameLower>$([System.String]::Copy($(_ZigToolsetPackageName)).ToLowerInvariant())</_ZigToolsetPackageNameLower>
+        <_ZigToolsetPackageRoot>$([MSBuild]::NormalizePath('$(NuGetPackageRoot)', '$(_ZigToolsetPackageNameLower)', '$(_ZigToolsetPackageVersion)'))</_ZigToolsetPackageRoot>
+        <_ZigToolsetPropsPath>$([MSBuild]::NormalizePath('$(_ZigToolsetPackageRoot)', 'build', '$(_ZigToolsetPackageName).props'))</_ZigToolsetPropsPath>
+    </PropertyGroup>
+
+    <!-- Grab the Zig SDK for the current platform -->
+    <ItemGroup>
+        <!-- Need PackageDownload so that it doesn't appear in the lock file (since this changes based on the host) -->
+        <PackageDownload Include="$(_ZigToolsetPackageName)" Version="[$(_ZigToolsetPackageVersion)]" />
+    </ItemGroup>
+    <ItemGroup>
+      <Folder Include="native\zig-out\lib\" />
+    </ItemGroup>
+
+    <Import Project="$(_ZigToolsetPropsPath)" Condition="Exists($(_ZigToolsetPropsPath))" />
+
+    <Target Name="CompileNativeLibraries" AfterTargets="Build">
+        <Exec Command="&quot;$(ZigExePath)&quot; build all" ConsoleToMSBuild="true" WorkingDirectory="$(MSBuildThisFileDirectory)native"/>
     </Target>
 
 </Project>

@@ -1,0 +1,25 @@
+.{
+    .name = .berryui_fna,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0xcc138fa8f7549d08,
+    .dependencies = .{
+        .zlib = .{
+            .url = "https://zlib.net/zlib-1.3.2.tar.gz",
+            .hash = "N-V-__8AAJ2cNgAgfBtAw33Bxfu1IWISDeKKSr3DAqoAysIJ",
+        },
+        .libpng = .{
+            .url = "https://prdownloads.sourceforge.net/libpng/libpng-1.6.58.tar.xz",
+            .hash = "N-V-__8AAJexYAClrDiJ2R-eT-rfMNK2Qd3--2FRhY7e5nvn",
+        },
+        .freetype = .{
+            .url = "https://download.sourceforge.net/freetype/freetype-2.14.3.tar.xz",
+            .hash = "N-V-__8AAJo-LAHFNfa0p0oMQqmwlBEAZMOeo03azXgrKLTT",
+        },
+        .kb = .{
+            .url = "git+https://github.com/JimmyLefevre/kb#b07373ded395b61d33a290181b957994db8edcfb",
+            .hash = "N-V-__8AAIHtGgAmKB0bXFdp25Ts4C9jGTH6NvuEJ9omP9sa",
+        },
+    },
+    .paths = .{""},
+}

@@ -1,6 +1,3 @@
 [submodule "FNA"]
 	path = BerryUI.FNA/FNA
 	url = https://github.com/FNA-XNA/FNA.git
-[submodule "BerryUI.FNA/FontStashSharp"]
-	path = BerryUI.FNA/FontStashSharp
-	url = https://github.com/FontStashSharp/FontStashSharp.git

@@ -1,10 +1,8 @@
+using BerryUI.Util;
+
 namespace BerryUI.Render;
 
 public class Window {
-    /// Unique numeric identifier for a window.
-    /// The actual value is implementation specific.
-    public readonly record struct Handle(uint Value);
-
     /// Current width of the window.
     public uint Width { get; private set; }
 
@@ -23,17 +21,15 @@ public class Window {
         }
     }
 
-    private readonly Handle handle;
+    private readonly ResourceHandle<Window> handle;
 
     /// Creates a new window with the specified dimensions.
     public Window(uint width, uint height) {
-        var window = UI.Backend.CreateWindow(width, height, new IBackend.WindowCallbacks(
+        handle = UI.Backend.CreateWindow(width, height, new IBackend.WindowCallbacks(
             OnResize));
 
         Width = width;
         Height = height;
-
-        handle = window.Handle;
     }
 
     private void OnResize(uint width, uint height) {
