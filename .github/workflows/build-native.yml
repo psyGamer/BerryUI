@@ -1,0 +1,375 @@
+name: Build Native Libraries
+
+on:
+  push:
+    paths:
+      - .github/workflows/build-native.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZLIB_VERSION: 1.3.1
+  LIBPNG_VERSION: 1.6.58
+  FREETYPE_VERSION: 2.14.3
+  SDL3_VERSION: 3.4.14
+  FNA_VERSION: 26.08
+  MOLTENVK_VERSION: 1.4.2
+  VULKAN_VERSION: 1.4.357.0
+  
+  BUILD_TYPE: Release
+
+jobs:
+  build-native:
+    strategy:
+      matrix:
+        include:
+          - name: Windows x86
+            os: windows-latest
+            platform: windows
+            msys2_system: mingw32
+            msys2_env: i686
+            cmake_flags: --verbose --parallel
+
+          - name: Windows x64
+            os: windows-latest
+            platform: windows
+            msys2_system: mingw64
+            msys2_env: x86_64
+            cmake_flags: --verbose --parallel
+
+          - name: Linux x64
+            os: ubuntu-latest
+            platform: linux
+            container: debian:buster # Required for GLIBC v2.28
+            cmake_flags:
+
+          - name: macOS x64
+            os: macos-15-intel
+            platform: macos
+            cmake_flags: --verbose --parallel
+
+    name: Native Libraries (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+
+    env:
+      MACOSX_DEPLOYMENT_TARGET: 10.12
+
+    defaults:
+      run:
+        shell: sh
+
+    steps:
+      - name: Install Git and cURL (Linux)
+        if: ${{ matrix.platform == 'linux' }}
+        run: |
+          # Debian buster is now EOL, need to set APT to use the package archive.
+          sed -i s/deb.debian.org/archive.debian.org/g /etc/apt/sources.list
+          apt-get update
+          apt-get install -y git curl ca-certificates
+
+      # Setup
+      - name: Set up MSVC (Windows)
+        uses: ilammy/msvc-dev-cmd@v1
+        if: ${{ matrix.platform == 'windows' }}
+        with:
+          arch: ${{ matrix.msys2_env == 'x86_64' && 'x64' || 'x86' }}
+
+      - name: Setup CMake (Windows)
+        uses: jwlawson/actions-setup-cmake@master
+        if: ${{ matrix.platform == 'windows' }}
+
+      - name: Set up Ninja (Windows)
+        uses: turtlesec-no/get-ninja@main
+        if: ${{ matrix.platform == 'windows' }}
+
+      - name: Set up NASM (Windows)
+        uses: ilammy/setup-nasm@v1
+        if: ${{ matrix.platform == 'windows' }}
+
+      - name: Set up MSYS2 (Windows)
+        uses: msys2/setup-msys2@v2
+        if: ${{ matrix.platform == 'windows' }}
+        with:
+          msystem: ${{ matrix.msys2_system }}
+          install: >-
+            mingw-w64-${{ matrix.msys2_env }}-cc
+            mingw-w64-${{ matrix.msys2_env }}-make
+
+      - name: Install dependencies (macOS)
+        if: ${{ matrix.platform == 'macos' }}
+        run: |
+          # SDL3 dependencies
+          brew install ninja
+
+      - name: Install dependencies (Linux)
+        if: ${{ matrix.platform == 'linux' }}
+        run: |
+          # SDL3 dependencies (https://github.com/libsdl-org/SDL/blob/main/docs/README-linux.md)
+          apt-get install -y build-essential make \
+              pkg-config cmake ninja-build gnome-desktop-testing libasound2-dev libpulse-dev \
+              libaudio-dev libfribidi-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
+              libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+              libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev \
+              libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev libudev-dev libthai-dev libusb-1.0-0-dev
+          
+          # Setup Debian Bullseye PPA for newer CMake and Wayland version
+          echo "deb http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.list
+          echo "deb http://security.debian.org/debian-security bullseye-security main" >> /etc/apt/sources.list
+          echo "deb http://archive.debian.org/debian bullseye-backports main" >> /etc/apt/sources.list
+          cat <<EOF > /etc/apt/preferences.d/bullseye
+          Package: *
+          Pin: release n=bullseye
+          Pin-Priority: 100
+          EOF
+          
+          apt-get update
+          apt-get install -y -t bullseye cmake libwayland-dev libdecor-0-dev
+      
+      - name: Create install prefix
+        run: |
+          mkdir -p prefix
+          echo "PREFIX=$(pwd)/prefix" >> $GITHUB_ENV
+      
+      # zlib
+      - name: Build zlib
+        run: |
+          curl -O -L https://github.com/madler/zlib/releases/download/v${{ env.ZLIB_VERSION }}/zlib-${{ env.ZLIB_VERSION }}.tar.gz
+          tar xzf zlib-${{ env.ZLIB_VERSION }}.tar.gz
+          cd zlib-${{ env.ZLIB_VERSION }}
+          
+          cmake -B build -G Ninja \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          
+          cmake --build build --config ${{ env.BUILD_TYPE }} ${{ matrix.cmake_flags }}
+          cmake --install build --config ${{ env.BUILD_TYPE }}
+          
+      # libpng
+      - name: Build libpng
+        run: |
+          curl -O -L https://sourceforge.net/projects/libpng/files/libpng16/${{ env.LIBPNG_VERSION }}/libpng-${{ env.LIBPNG_VERSION }}.tar.gz
+          tar xzf libpng-${{ env.LIBPNG_VERSION }}.tar.gz
+          cd libpng-${{ env.LIBPNG_VERSION }}
+          
+          cmake -B build -G Ninja \
+            -DPNG_SHARED=OFF \
+            -DPNG_STATIC=ON \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          
+          cmake --build build --config ${{ env.BUILD_TYPE }} ${{ matrix.cmake_flags }}
+          cmake --install build --config ${{ env.BUILD_TYPE }}
+
+      # FreeType
+      - name: Build FreeType
+        run: |
+          curl -O -L https://sourceforge.net/projects/freetype/files/freetype2/${{ env.FREETYPE_VERSION }}/freetype-${{ env.FREETYPE_VERSION }}.tar.gz
+          tar xzf freetype-${{ env.FREETYPE_VERSION }}.tar.gz
+          cd freetype-${{ env.FREETYPE_VERSION }}
+          
+          cmake -B build -G Ninja \
+            -DBUILD_SHARED_LIBS=ON \
+            -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          
+          cmake --build build --config ${{ env.BUILD_TYPE }} ${{ matrix.cmake_flags }}
+          cmake --install build --config ${{ env.BUILD_TYPE }}
+
+      # kb_text_shape
+      - name: Build kb_text_shape
+        run: |
+          git clone https://github.com/JimmyLefevre/kb.git
+          cd kb
+          git checkout b07373ded395b61d33a290181b957994db8edcfb # v2.25
+          
+          echo "#define KB_TEXT_SHAPE_IMPLEMENTATION" > kb_text_shape.c
+          echo "#include <kb_text_shape.h>"           > kb_text_shape.c
+          
+          if [ "x${{ runner.os }}" = "xWindows" ]; then
+            WIN_PREFIX=$(cygpath -w "${{ env.PREFIX }}")
+            cl -LD -MT -O2 -I. kb_text_shape.c -Fe:$WIN_PREFIX/bin/kb.dll
+          elif [ "x${{ runner.os }}" = "xmacOS" ]; then
+            cc -shared -fPIC -O2 -I. kb_text_shape.c -o ${{ env.PREFIX }}/lib/libkb.dylib
+          elif [ "x${{ runner.os }}" = "xLinux" ]; then
+            cc -shared -fPIC -O2 -I. kb_text_shape.c -o ${{ env.PREFIX }}/lib/libkb.so
+          fi
+
+      # SDL3
+      - name: Build SDL3
+        run: |
+          git clone --recursive --depth=1 https://github.com/libsdl-org/SDL.git --branch release-${{ env.SDL3_VERSION }}
+          cd SDL
+          
+          cmake -B build -G Ninja \
+            -DSDL_VENDOR_INFO="GitHub Workflow" \
+            -DSDL_CMAKE_DEBUG_POSTFIX="" \
+            -DSDL_FORCE_STATIC_VCRT=ON \
+            -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          
+          cmake --build build --config ${{ env.BUILD_TYPE }} ${{ matrix.cmake_flags }}
+          cmake --install build --config ${{ env.BUILD_TYPE }}
+      
+      # FNA3D
+      - name: Build FNA3D
+        run: |
+          git clone --recursive --depth=1 https://github.com/FNA-XNA/FNA3D.git --branch ${{ env.FNA_VERSION }}
+          cd FNA3D
+          
+          if [ "x${{ runner.os }}" = "xWindows" ]; then
+            # Update CMake to use CMAKE_MSVC_RUNTIME_LIBRARY
+            sed -i 's/cmake_minimum_required.*/cmake_minimum_required(VERSION 3.16)/' CMakeLists.txt
+          fi
+          
+          cmake -B build -G Ninja \
+            -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" \
+            -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          
+          cmake --build build --config ${{ env.BUILD_TYPE }} ${{ matrix.cmake_flags }}
+          cmake --install build --config ${{ env.BUILD_TYPE }}
+      
+      # FAudio
+      - name: Build FAudio
+        run: |
+          git clone --recursive --depth=1 https://github.com/FNA-XNA/FAudio.git --branch ${{ env.FNA_VERSION }}
+          cd FAudio
+          
+          if [ "x${{ runner.os }}" = "xWindows" ]; then
+            # Update CMake to use CMAKE_MSVC_RUNTIME_LIBRARY
+            sed -i 's/cmake_minimum_required.*/cmake_minimum_required(VERSION 3.16)/' CMakeLists.txt
+          fi
+          
+          cmake -B build -G Ninja \
+            -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" \
+            -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          
+          cmake --build build --config ${{ env.BUILD_TYPE }} ${{ matrix.cmake_flags }}
+          cmake --install build --config ${{ env.BUILD_TYPE }}
+
+      # Theorafile
+      - name: Fetch Theorafile
+        run: git clone --recursive --depth=1 https://github.com/FNA-XNA/Theorafile.git
+      
+      - name: Build Theorafile (Windows)
+        if: ${{ matrix.platform == 'windows' }}
+        working-directory: Theorafile
+        shell: msys2 {0}
+        run: mingw32-make
+
+      - name: Build Theorafile (macOS & Linux)
+        if: ${{ matrix.platform != 'windows' }}
+        working-directory: Theorafile
+        run: make
+      
+      # MoltenVK
+      - name: Build MoltenVK (macOS)
+        if: ${{ matrix.platform == 'macos' }}
+        working-directory: source/MoltenVK
+        run: |
+          git clone --recursive --depth=1 https://github.com/KhronosGroup/MoltenVK.git --branch v${{ env.MOLTENVK_VERSION }}
+          cd MoltenVK
+
+          ./fetchDependencies --macos -v
+          make macos
+
+      - name: Build Vulkan Loader (macOS)
+        if: ${{ matrix.platform == 'macos' }}
+        run: |
+          git clone --recursive --depth=1 https://github.com/KhronosGroup/Vulkan-Headers.git --branch vulkan-sdk-${{ env.VULKAN_VERSION }}
+          git clone --recursive --depth=1 https://github.com/KhronosGroup/Vulkan-Loader.git --branch vulkan-sdk-${{ env.VULKAN_VERSION }}
+          cd Vulkan-Loader
+
+          mkdir -p build
+          cd build
+
+          cmake .. \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+            -DUPDATE_DEPS=ON \
+            -DVULKAN_HEADERS_INSTALL_DIR="${{ github.workspace }}/Vulkan-Headers" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET
+
+          make
+      
+      # Upload
+      - name: Copy binaries (Windows)
+        if: ${{ matrix.platform == 'windows' }}
+        run: |
+          cp ${{ env.PREFIX }}/bin/freetype.dll freetype.dll
+          cp ${{ env.PREFIX }}/bin/kb.dll kb.dll
+          cp ${{ env.PREFIX }}/bin/SDL3.dll SDL3.dll
+          cp ${{ env.PREFIX }}/bin/FNA3D.dll FNA3D.dll
+          cp ${{ env.PREFIX }}/bin/FAudio.dll FAudio.dll
+          cp Theorafile/libtheorafile.dll libtheorafile.dll
+
+      - name: Copy binaries (macOS)
+        if: ${{ matrix.platform == 'macos' }}
+        run: |
+          cp ${{ env.PREFIX }}/lib/libfreetype.dylib libfreetype.dylib
+          cp ${{ env.PREFIX }}/lib/libkb.dylib libkb.dylib
+          cp ${{ env.PREFIX }}/lib/libSDL3.dylib libSDL3.dylib
+          cp ${{ env.PREFIX }}/lib/libFNA3D.0.dylib libFNA3D.0.dylib
+          cp ${{ env.PREFIX }}/lib/libFAudio.0.dylib libFAudio.0.dylib
+          cp Theorafile/libtheorafile.dylib libtheorafile.dylib
+          cp MoltenVK/Package/Release/MoltenVK/dylib/macOS/libMoltenVK.dylib libMoltenVK.dylib
+          cp Vulkan-Loader/build/loader/libvulkan.1.dylib libvulkan.1.dylib
+
+      - name: Copy binaries (Linux)
+        if: ${{ matrix.platform == 'linux' }}
+        run: |
+          cp ${{ env.PREFIX }}/lib/libfreetype.so libfreetype.so
+          cp ${{ env.PREFIX }}/lib/libkb.so libkb.so
+          cp ${{ env.PREFIX }}/lib/libSDL3.so.0 libSDL3.so.0
+          cp ${{ env.PREFIX }}/lib/libFNA3D.so.0 libFNA3D.so.0
+          cp ${{ env.PREFIX }}/lib/libFAudio.so.0 libFAudio.so.0
+          cp Theorafile/libtheorafile.so libtheorafile.so
+
+      - name: Upload Artifacts (Windows)
+        uses: actions/upload-artifact@v7
+        if: ${{ matrix.platform == 'windows' }}
+        with:
+          name: native-windows-${{ matrix.msys2_env }}
+          path: |
+            freetype.dll
+            kb.dll
+            SDL3.dll
+            FNA3D.dll
+            FAudio.dll
+            libtheorafile.dll
+
+      - name: Upload Artifacts (macOS)
+        uses: actions/upload-artifact@v7
+        if: ${{ matrix.platform == 'macos' }}
+        with:
+          name: native-macos-x86_64
+          path: |
+            libfreetype.dylib
+            libkb.dylib
+            libSDL3.dylib
+            libFNA3D.0.dylib
+            libFAudio.0.dylib
+            libtheorafile.dylib
+            libMoltenVK.dylib
+            libvulkan.1.dylib
+
+      - name: Upload Artifacts (Linux)
+        uses: actions/upload-artifact@v7
+        if: ${{ matrix.platform == 'linux' }}
+        with:
+          name: native-linux-x86_64
+          path: |
+            libfreetype.so
+            libkb.so
+            libSDL3.so.0
+            libFNA3D.so.0
+            libFAudio.so.0
+            libtheorafile.so
+            libfmod_SDL.so
