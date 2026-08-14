@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) !void {
 
     {
         const target = b.standardTargetOptions(.{});
-
+        
         const zlib = buildZLib(b, target, optimize);
         const libpng = buildLibpng(b, target, optimize, zlib);
         const freetype = buildFreetype(b, target, optimize, zlib, libpng);
@@ -28,16 +28,17 @@ pub fn build(b: *std.Build) !void {
         const zlib = buildZLib(b, target, optimize);
         const libpng = buildLibpng(b, target, optimize, zlib);
         const freetype = buildFreetype(b, target, optimize, zlib, libpng);
+        const kb = buildKb(b, target, optimize);
 
-        const usf = installRuntime(b, target, freetype.getEmittedBin(), "freetype");
+        const usf = b.addUpdateSourceFiles();
+        installRuntime(b, usf, target, freetype.getEmittedBin(), "freetype");
+        installRuntime(b, usf, target, kb.getEmittedBin(), "kb");
         all_step.dependOn(&usf.step);
     }
 }
 
 /// Copies a file into the appropriate 'runtimes' directory
-fn installRuntime(b: *std.Build, target: std.Build.ResolvedTarget, lib_path: std.Build.LazyPath, lib_name: []const u8) *std.Build.Step.UpdateSourceFiles {
-    const usf = b.addUpdateSourceFiles();
-
+fn installRuntime(b: *std.Build, usf: *std.Build.Step.UpdateSourceFiles, target: std.Build.ResolvedTarget, lib_path: std.Build.LazyPath, lib_name: []const u8,) void {
     const runtimes_dir = b.pathJoin(&.{ "..", "runtimes" });
     if (target.result.os.tag == .linux) {
         const lib_file = b.fmt("lib{s}.so", .{lib_name});
@@ -71,8 +72,6 @@ fn installRuntime(b: *std.Build, target: std.Build.ResolvedTarget, lib_path: std
     } else {
         @panic("Unsupported OS");
     }
-
-    return usf;
 }
 
 fn buildZLib(

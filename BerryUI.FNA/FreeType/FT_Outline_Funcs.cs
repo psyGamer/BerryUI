@@ -1,5 +1,8 @@
+using System.CodeDom.Compiler;
+
 namespace BerryUI.FNA.FreeType;
 
+[GeneratedCode("ClangSharp", "22.1.8.0")]
 public unsafe partial struct FT_Outline_Funcs
 {
     [NativeTypeName("FT_Outline_MoveToFunc")]
@@ -17,5 +20,5 @@ public unsafe partial struct FT_Outline_Funcs
     public int shift;
 
     [NativeTypeName("FT_Pos")]
-    public nint delta;
+    public long delta;
 }

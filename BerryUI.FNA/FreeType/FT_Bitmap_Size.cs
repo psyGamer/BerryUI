@@ -1,5 +1,8 @@
+using System.CodeDom.Compiler;
+
 namespace BerryUI.FNA.FreeType;
 
+[GeneratedCode("ClangSharp", "22.1.8.0")]
 public partial struct FT_Bitmap_Size
 {
     [NativeTypeName("FT_Short")]
@@ -9,11 +12,11 @@ public partial struct FT_Bitmap_Size
     public short width;
 
     [NativeTypeName("FT_Pos")]
-    public nint size;
+    public long size;
 
     [NativeTypeName("FT_Pos")]
-    public nint x_ppem;
+    public long x_ppem;
 
     [NativeTypeName("FT_Pos")]
-    public nint y_ppem;
+    public long y_ppem;
 }

@@ -1,8 +1,11 @@
+using System.CodeDom.Compiler;
+
 namespace BerryUI.FNA.FreeType;
 
+[GeneratedCode("ClangSharp", "22.1.8.0")]
 public unsafe partial struct FT_Raster_Funcs
 {
-    public FT_Glyph_Format glyph_format;
+    public unsafe FT_Glyph_Format glyph_format;
 
     [NativeTypeName("FT_Raster_NewFunc")]
     public delegate* unmanaged[Cdecl]<void*, FT_Raster*, int> raster_new;

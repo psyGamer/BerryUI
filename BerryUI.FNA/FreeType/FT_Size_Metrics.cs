@@ -1,5 +1,8 @@
+using System.CodeDom.Compiler;
+
 namespace BerryUI.FNA.FreeType;
 
+[GeneratedCode("ClangSharp", "22.1.8.0")]
 public partial struct FT_Size_Metrics
 {
     [NativeTypeName("FT_UShort")]
@@ -15,14 +18,14 @@ public partial struct FT_Size_Metrics
     public nint y_scale;
 
     [NativeTypeName("FT_Pos")]
-    public nint ascender;
+    public long ascender;
 
     [NativeTypeName("FT_Pos")]
-    public nint descender;
+    public long descender;
 
     [NativeTypeName("FT_Pos")]
-    public nint height;
+    public long height;
 
     [NativeTypeName("FT_Pos")]
-    public nint max_advance;
+    public long max_advance;
 }

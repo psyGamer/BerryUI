@@ -10,7 +10,7 @@ namespace BerryUI.FNA;
 public sealed class FNAWindow : IBackend.IWindow, IDisposable {
     public readonly IntPtr Pointer;
     public readonly uint ID;
-    public readonly CommandBuffer CommandBuffer = new(BerryTexture.Screen);
+    public readonly CommandEncoder CommandEncoder = new(BerryTexture.Screen);
 
     private readonly IBackend.WindowCallbacks callbacks;
     private int prevWidth, prevHeight;
@@ -56,15 +56,15 @@ public sealed class FNAWindow : IBackend.IWindow, IDisposable {
             prevHeight = currHeight;
 
             callbacks.OnResize((uint)currWidth, (uint)currHeight);
-            RootWidget?.InvalidateLayoutAndDraw();
+            RootWidget?.InvalidateLayout();
             NeedsClear = true;
         }
 
         if (RootWidget is { } root) {
             UI.Update(root);
 
-            CommandBuffer.Reset();
-            UI.Draw(root, CommandBuffer);
+            CommandEncoder.Reset();
+            UI.Draw(root, CommandEncoder);
         }
     }
 

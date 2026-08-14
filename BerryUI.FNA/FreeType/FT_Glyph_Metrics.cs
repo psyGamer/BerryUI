@@ -1,28 +1,31 @@
+using System.CodeDom.Compiler;
+
 namespace BerryUI.FNA.FreeType;
 
+[GeneratedCode("ClangSharp", "22.1.8.0")]
 public partial struct FT_Glyph_Metrics
 {
     [NativeTypeName("FT_Pos")]
-    public nint width;
+    public long width;
 
     [NativeTypeName("FT_Pos")]
-    public nint height;
+    public long height;
 
     [NativeTypeName("FT_Pos")]
-    public nint horiBearingX;
+    public long horiBearingX;
 
     [NativeTypeName("FT_Pos")]
-    public nint horiBearingY;
+    public long horiBearingY;
 
     [NativeTypeName("FT_Pos")]
-    public nint horiAdvance;
+    public long horiAdvance;
 
     [NativeTypeName("FT_Pos")]
-    public nint vertBearingX;
+    public long vertBearingX;
 
     [NativeTypeName("FT_Pos")]
-    public nint vertBearingY;
+    public long vertBearingY;
 
     [NativeTypeName("FT_Pos")]
-    public nint vertAdvance;
+    public long vertAdvance;
 }

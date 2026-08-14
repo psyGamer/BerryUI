@@ -1,5 +1,8 @@
 using System;
+using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Net;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -25,14 +28,37 @@ public struct Color {
     /// The packed value of this <see cref="Color"/>
     [FieldOffset(0)] public uint PackedValue;
 
-    public Color(uint packed) {
-        PackedValue = packed;
+    /// Convert a hex literal of the format 0xRRGGBB into a color.
+    public static Color FromRGB(uint value) {
+        if (BitConverter.IsLittleEndian) {
+            value = BinaryPrimitives.ReverseEndianness(value);
+        }
 
-        // These have been initialized through the packed value assignment
-        Unsafe.SkipInit(out R);
-        Unsafe.SkipInit(out G);
-        Unsafe.SkipInit(out B);
-        Unsafe.SkipInit(out A);
+        return new Color(value | 0x000000FF);
+    }
+    /// Convert a hex literal of the format 0xRRGGBBAA into a color.
+    public static Color FromRGBA(uint value) {
+        if (BitConverter.IsLittleEndian) {
+            value = BinaryPrimitives.ReverseEndianness(value);
+        }
+
+        return new Color(value);
+    }
+    /// Convert a hex literal of the format 0xAARRGGBB into a color.
+    public static Color FromARGB(uint value) {
+        if (BitConverter.IsLittleEndian) {
+            value = BinaryPrimitives.ReverseEndianness(value);
+        }
+
+        return new Color(BitOperations.RotateLeft(value, 8));
+    }
+    /// Convert a hex literal of the format 0xAABBGGRR into a color.
+    public static Color FromABGR(uint value) {
+        if (!BitConverter.IsLittleEndian) {
+            value = BinaryPrimitives.ReverseEndianness(value);
+        }
+
+        return new Color(value);
     }
 
     public Color(byte r, byte g, byte b) {
@@ -40,6 +66,8 @@ public struct Color {
         G = g;
         B = b;
         A = byte.MaxValue;
+
+        Unsafe.SkipInit(out PackedValue);
     }
 
     public Color(byte r, byte g, byte b, byte a) {
@@ -47,6 +75,8 @@ public struct Color {
         G = g;
         B = b;
         A = a;
+
+        Unsafe.SkipInit(out PackedValue);
     }
 
     public Color(float r, float g, float b) {
@@ -54,6 +84,8 @@ public struct Color {
         G = byte.CreateSaturating(g * byte.MaxValue);
         B = byte.CreateSaturating(b * byte.MaxValue);
         A = byte.MaxValue;
+
+        Unsafe.SkipInit(out PackedValue);
     }
 
     public Color(float r, float g, float b, float a) {
@@ -61,6 +93,8 @@ public struct Color {
         G = byte.CreateSaturating(g * byte.MaxValue);
         B = byte.CreateSaturating(b * byte.MaxValue);
         A = byte.CreateSaturating(a * byte.MaxValue);
+
+        Unsafe.SkipInit(out PackedValue);
     }
 
     public Color(Vec3 color) {
@@ -68,6 +102,8 @@ public struct Color {
         G = byte.CreateSaturating(color.Y * byte.MaxValue);
         B = byte.CreateSaturating(color.Z * byte.MaxValue);
         A = byte.MaxValue;
+
+        Unsafe.SkipInit(out PackedValue);
     }
 
     public Color(Vec4 color) {
@@ -75,6 +111,17 @@ public struct Color {
         G = byte.CreateSaturating(color.Y * byte.MaxValue);
         B = byte.CreateSaturating(color.Z * byte.MaxValue);
         A = byte.CreateSaturating(color.W * byte.MaxValue);
+
+        Unsafe.SkipInit(out PackedValue);
+    }
+
+    private Color(uint packed) {
+        PackedValue = packed;
+
+        Unsafe.SkipInit(out R);
+        Unsafe.SkipInit(out G);
+        Unsafe.SkipInit(out B);
+        Unsafe.SkipInit(out A);
     }
 
     public Vec3 ToVec3() => new(
@@ -89,9 +136,9 @@ public struct Color {
         A / (float)byte.MaxValue);
 
     public static Color operator *(Color color, float scalar) => new(
-        byte.CreateSaturating(color.R * scalar),
-        byte.CreateSaturating(color.G * scalar),
-        byte.CreateSaturating(color.B * scalar),
+        color.R/*byte.CreateSaturating(color.R * scalar)*/,
+        color.G/*byte.CreateSaturating(color.G * scalar)*/,
+        color.B/*byte.CreateSaturating(color.B * scalar)*/,
         byte.CreateSaturating(color.A * scalar));
 
     public static bool operator ==(Color a, Color b) => a.Equals(b);

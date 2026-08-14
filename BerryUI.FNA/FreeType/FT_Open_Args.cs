@@ -1,5 +1,8 @@
+using System.CodeDom.Compiler;
+
 namespace BerryUI.FNA.FreeType;
 
+[GeneratedCode("ClangSharp", "22.1.8.0")]
 public unsafe partial struct FT_Open_Args
 {
     [NativeTypeName("FT_UInt")]
@@ -15,7 +18,7 @@ public unsafe partial struct FT_Open_Args
     public sbyte* pathname;
 
     [NativeTypeName("FT_Stream")]
-    public FT_StreamRec* stream;
+    public unsafe FT_StreamRec* stream;
 
     public unsafe FT_Module driver;
 

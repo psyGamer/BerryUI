@@ -134,7 +134,7 @@ public class Atlas(uint pageSize, uint padding) : IDisposable {
         return handle;
     }
 
-    /// Provides the texture view into the packe target location
+    /// Provides the texture view into the packed target location
     public Texture GetTexture(ResourceHandle<Entry> handle) {
         var entry = entries[(int)handle.Value];
         var page = pages[entry.PageIndex];

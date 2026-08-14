@@ -1,5 +1,8 @@
+using System.CodeDom.Compiler;
+
 namespace BerryUI.FNA.FreeType;
 
+[GeneratedCode("ClangSharp", "22.1.8.0")]
 public unsafe partial struct FT_GlyphSlotRec
 {
     public unsafe FT_Library library;
@@ -7,14 +10,14 @@ public unsafe partial struct FT_GlyphSlotRec
     public unsafe FT_Face face;
 
     [NativeTypeName("FT_GlyphSlot")]
-    public FT_GlyphSlotRec* next;
+    public unsafe FT_GlyphSlotRec* next;
 
     [NativeTypeName("FT_UInt")]
     public uint glyph_index;
 
     public FT_Generic generic;
 
-    public FT_Glyph_Metrics metrics;
+    public unsafe FT_Glyph_Metrics metrics;
 
     [NativeTypeName("FT_Fixed")]
     public nint linearHoriAdvance;
@@ -24,7 +27,7 @@ public unsafe partial struct FT_GlyphSlotRec
 
     public FT_Vector advance;
 
-    public FT_Glyph_Format format;
+    public unsafe FT_Glyph_Format format;
 
     public FT_Bitmap bitmap;
 
@@ -47,10 +50,10 @@ public unsafe partial struct FT_GlyphSlotRec
     public nint control_len;
 
     [NativeTypeName("FT_Pos")]
-    public nint lsb_delta;
+    public long lsb_delta;
 
     [NativeTypeName("FT_Pos")]
-    public nint rsb_delta;
+    public long rsb_delta;
 
     public void* other;
 

@@ -4,13 +4,14 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using SDL2;
 using System;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using BerryColor = BerryUI.Util.Color;
 using BerryWindow = BerryUI.Render.Window;
 using BerryTexture = BerryUI.Render.Texture;
-using BerryFontFamily = BerryUI.Render.FontFamily;
-using BerryFontFace = BerryUI.Render.FontFace;
-using FNAColor = Microsoft.Xna.Framework.Color;
+using BerryFont = BerryUI.Render.Font;
+using BerryTextBlob = BerryUI.Render.TextBlob;
 
 namespace BerryUI.FNA;
 
@@ -21,6 +22,7 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
     public ResourceHandle<BerryWindow> Handle => new(MainWindowHandle);
 
     private USize minimumSize;
+
     public USize MinimumSize {
         get => minimumSize;
         set {
@@ -31,6 +33,8 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
 
     public Widget? RootWidget { get; set; }
 
+    private readonly AssetDirectory assets;
+
     private readonly GraphicsDeviceManager graphics;
 
     // ReSharper disable once PrivateFieldCanBeConvertedToLocalVariable
@@ -38,12 +42,14 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
     private readonly SDL.SDL_EventFilter? prevEventFilter;
 
     private SpriteBatch batch = null!;
-    private readonly CommandBuffer commandBuffer = new(BerryTexture.Screen);
+    private RenderTarget2D? screenTargetA, screenTargetB;
+
+    private readonly CommandEncoder commandEncoder = new(BerryTexture.Screen);
 
     private readonly ResourcePool<BerryWindow, FNAWindow> windowPool = new();
     private readonly ResourcePool<BerryTexture, FNATexture> texturePool = new();
-    private readonly ResourcePool<BerryFontFamily, FNAFontFamily> fontFamilyPool = new();
-    private readonly ResourcePool<BerryFontFace, FNAFontFace> fontFacePool = new();
+    private readonly ResourcePool<BerryFont, FNAFont> fontPool = new();
+    private readonly ResourcePool<BerryTextBlob, FNATextBlob> textBlobPool = new();
 
     private int prevWidth, prevHeight;
     private bool initializedMainWindow;
@@ -55,6 +61,14 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
         graphics = new GraphicsDeviceManager(this);
         graphics.PreferredDepthStencilFormat = DepthFormat.None;
         graphics.SynchronizeWithVerticalRetrace = true;
+        graphics.PreferredBackBufferFormat = SurfaceFormat.Color;
+
+        // For debug builds, enable hot reload and use the assets from the project source
+#if DEBUG
+        assets = new AssetDirectory.FileSystem(Path.Combine(DebugBuildInfo.ProjectPath, "Assets", "BerryUI.FNA"), hotReload: true);
+#else
+        assets = new AssetDirectory.FileSystem(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "BerryUI.FNA"), hotReload: false);
+#endif
 
         Window.AllowUserResizing = true;
         IsMouseVisible = true;
@@ -91,11 +105,15 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
     protected override void LoadContent() {
         batch = new SpriteBatch(graphics.GraphicsDevice);
 
+        FNARenderer.LoadContent(graphics.GraphicsDevice, assets, (bool)typeof(SpriteBatch).GetField("supportsNoOverwrite", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(batch)!);
+
         UI.LoadContent();
     }
 
     protected override void UnloadContent() {
         UI.UnloadContent();
+
+        assets.Dispose();
 
         batch.Dispose();
         batch = null!;
@@ -109,15 +127,15 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
             needsClear = true;
 
             mainWindowCallbacks.OnResize((uint)bounds.Width, (uint)bounds.Height);
-            RootWidget?.InvalidateLayoutAndDraw();
+            RootWidget?.InvalidateLayout();
+            needsClear = true;
         }
 
         if (RootWidget is { } root) {
             UI.Update(root);
 
-            commandBuffer.Reset();
-            root.InvalidateDraw();
-            UI.Draw(root, commandBuffer);
+            commandEncoder.Reset();
+            UI.Draw(root, commandEncoder);
         }
 
         foreach (var window in windowPool) {
@@ -149,89 +167,57 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
             graphics.GraphicsDevice.Reset(pp);
             Console.WriteLine("GraphicsDevice reset!");
         }
+
+        if (screenTargetA == null || screenTargetA.Width != bounds.Width || screenTargetA.Height != bounds.Height ||
+            screenTargetB == null || screenTargetB.Width != bounds.Width || screenTargetB.Height != bounds.Height
+           ) {
+            screenTargetA?.Dispose();
+            screenTargetA = new RenderTarget2D(graphics.GraphicsDevice,
+                bounds.Width, bounds.Height, mipMap: false,
+                SurfaceFormat.HalfVector4, pp.DepthStencilFormat, pp.MultiSampleCount, pp.RenderTargetUsage);
+
+            screenTargetB?.Dispose();
+            screenTargetB = new RenderTarget2D(graphics.GraphicsDevice,
+                bounds.Width, bounds.Height, mipMap: false,
+                SurfaceFormat.HalfVector4, pp.DepthStencilFormat, pp.MultiSampleCount, pp.RenderTargetUsage);
+        }
     }
 
     protected override void Draw(GameTime gameTime) {
         ValidateBackBuffer();
 
         foreach (var window in windowPool) {
+            if (window.CommandEncoder.IsEmpty) {
+                continue;
+            }
+
             SDL.SDL_GetWindowSize(window.Pointer, out int windowWidth, out int windowHeight);
 
             graphics.GraphicsDevice.Viewport = new Viewport(0, 0, windowWidth, windowHeight);
-            if (window.NeedsClear) {
-                window.NeedsClear = false;
-                GraphicsDevice.Clear(FNAColor.Black);
-            }
-            DrawCommandBuffer(window.CommandBuffer);
-            graphics.GraphicsDevice.Present(
-                new Rectangle(0, 0, windowWidth, windowHeight),
-                null,
-                window.Pointer
-            );
+            FNARenderer.Render(
+                commandEncoder, graphics.GraphicsDevice,
+                screenTargetA!, screenTargetB!, needsClear,
+                texturePool, fontPool, textBlobPool);
+            needsClear = false;
+            graphics.GraphicsDevice.Present(new Rectangle(0, 0, windowWidth, windowHeight), null, window.Pointer);
+        }
+
+        if (commandEncoder.IsEmpty) {
+            return;
         }
 
         var bounds = Window.ClientBounds;
         graphics.GraphicsDevice.Viewport = new Viewport(0, 0, bounds.Width, bounds.Height);
-        if (needsClear) {
-            needsClear = false;
-            GraphicsDevice.Clear(FNAColor.Black);
-        }
-
-        DrawCommandBuffer(commandBuffer);
+        FNARenderer.Render(
+            commandEncoder, graphics.GraphicsDevice,
+            screenTargetA!, screenTargetB!, needsClear,
+            texturePool, fontPool, textBlobPool);
+        needsClear = false;
+        graphics.GraphicsDevice.Present(new Rectangle(0, 0, bounds.Width, bounds.Height), null, Window.Handle);
     }
 
-    // Override this so that we can present with subrectangle
     protected override void EndDraw() {
-        var bounds = Window.ClientBounds;
-        graphics.GraphicsDevice.Present(
-            new Rectangle(0, 0, bounds.Width, bounds.Height),
-            null,
-            Window.Handle
-        );
-    }
-
-    private void DrawCommandBuffer(CommandBuffer buf) {
-        // Process text
-        foreach (var text in buf.TextCommands) {
-            var face = fontFacePool[text.Font];
-            face.RegisterText(text.Text);
-        }
-        foreach (var face in fontFacePool) {
-            face.StoreNew(texturePool);
-        }
-
-        batch.Begin(
-            SpriteSortMode.Deferred,
-            BlendState.AlphaBlend,
-            SamplerState.PointClamp,
-            DepthStencilState.None,
-            new RasterizerState {
-                CullMode = CullMode.CullCounterClockwiseFace,
-                ScissorTestEnable = false,
-                MultiSampleAntiAlias = false,
-            });
-
-        int spriteIdx = 0, textIdx = 0;
-        foreach (var type in buf.CommandTypes) {
-            switch (type) {
-                case CmdType.Sprite:
-                    var sprite = buf.SpriteCommands[spriteIdx++];
-                    batch.Draw(
-                        texture: texturePool[sprite.Texture].Texture,
-                        destinationRectangle: sprite.Destination.ToFNA(),
-                        sourceRectangle: sprite.Source.ToFNA(),
-                        color: sprite.Color.ToFNA());
-                    break;
-
-                case CmdType.Text:
-                    var text = buf.TextCommands[textIdx++];
-                    var face = fontFacePool[text.Font];
-                    face.RenderText(text.Text, batch, text.Position.ToVector2(), texturePool);
-                    break;
-            }
-        }
-
-        batch.End();
+        // Prevent FNA from calling Present, since we already did that inside Draw
     }
 
     public ResourceHandle<BerryWindow> CreateWindow(uint width, uint height, IBackend.WindowCallbacks callbacks) {
@@ -249,6 +235,7 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
         window.Handle = windowPool.Allocate(window);
         return window.Handle;
     }
+
     public void DestroyWindow(ResourceHandle<BerryWindow> handle) {
         if (handle.Value == MainWindowHandle) {
             Exit();
@@ -257,6 +244,7 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
 
         windowPool.Free(handle);
     }
+
     public IBackend.IWindow GetWindow(ResourceHandle<BerryWindow> handle) {
         if (handle.Value == MainWindowHandle) {
             return this;
@@ -270,31 +258,36 @@ public sealed class FNAGameBackend : Game, IBackend, IBackend.IWindow {
         texture.Handle = texturePool.Allocate(texture);
         return texture.Handle;
     }
+
     public void DestroyTexture(ResourceHandle<BerryTexture> handle) {
         texturePool.Free(handle);
     }
 
-    public ResourceHandle<BerryFontFamily> CreateFontFamily(byte[] data) {
-        var fontFamily = new FNAFontFamily(data);
-        fontFamily.Handle = fontFamilyPool.Allocate(fontFamily);
-        return fontFamily.Handle;
-    }
-    public void DestroyFontFamily(ResourceHandle<BerryFontFamily> handle) {
-        fontFamilyPool.Free(handle);
-    }
-    public IBackend.IFontFamily GetFontFamily(ResourceHandle<BerryFontFamily> handle) {
-        return fontFamilyPool[handle];
+    public ResourceHandle<BerryFont> CreateFont(byte[] data) {
+        var font = new FNAFont(data);
+        font.Handle = fontPool.Allocate(font);
+        return font.Handle;
     }
 
-    public ResourceHandle<BerryFontFace> CreateFontFace(ResourceHandle<BerryFontFamily> family, float size) {
-        var fontFace = new FNAFontFace(fontFamilyPool[family], size);
-        fontFace.Handle = fontFacePool.Allocate(fontFace);
-        return fontFace.Handle;
+    public void DestroyFont(ResourceHandle<BerryFont> handle) {
+        fontPool.Free(handle);
     }
-    public void DestroyFontFace(ResourceHandle<BerryFontFace> handle) {
-        fontFacePool.Free(handle);
+
+    public IBackend.IFont GetFont(ResourceHandle<BerryFont> handle) {
+        return fontPool[handle];
     }
-    public IBackend.IFontFace GetFontFace(ResourceHandle<BerryFontFace> handle) {
-        return fontFacePool[handle];
+
+    public ResourceHandle<BerryTextBlob> CreateSimpleTextBlob(ResourceHandle<BerryFont> font, uint pixelSize, ReadOnlySpan<char> text, float maxWidth) {
+        var textBlob = FNATextBlob.ShapeSimple(fontPool[font], pixelSize, text, maxWidth);
+        textBlob.Handle = textBlobPool.Allocate(textBlob);
+        return textBlob.Handle;
+    }
+
+    public void DestroyTextBlob(ResourceHandle<BerryTextBlob> handle) {
+        textBlobPool.Free(handle);
+    }
+
+    public IBackend.ITextBlob GetTextBlob(ResourceHandle<BerryTextBlob> handle) {
+        return textBlobPool[handle];
     }
 }

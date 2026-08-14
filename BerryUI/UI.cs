@@ -1,4 +1,5 @@
 using BerryUI.Render;
+using BerryUI.Util;
 using System;
 
 namespace BerryUI;
@@ -44,21 +45,14 @@ public static class UI {
         }
     }
 
-    public static void Draw(Widget root, CommandBuffer buf) {
+    public static void Draw(Widget root, CommandEncoder enc) {
         if (!loadedContent) {
             throw new Exception("Content is not loaded");
         }
 
-        while (root.NeedsDraw) {
-            // We can't draw with a pending layout
-            while (root.NeedsLayout) {
-                root.NeedsLayout = false;
-                root.ResolveLayout();
-            }
-
-            root.NeedsDraw = false;
-
-            root.Draw(buf);
+        if (root.CheckDraw(enc, out var drawRegion)) {
+            enc.Rect(drawRegion, Color.Black); // TODO: Configurable background color
+            root.Draw(enc, drawRegion);
         }
     }
 }

@@ -1,0 +1,11 @@
+using System.CodeDom.Compiler;
+
+namespace BerryUI.FNA.FreeType;
+
+[GeneratedCode("ClangSharp", "22.1.8.0")]
+public partial struct FT_OutlineGlyphRec
+{
+    public unsafe FT_GlyphRec root;
+
+    public FT_Outline outline;
+}

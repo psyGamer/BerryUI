@@ -1,5 +1,8 @@
+using System.CodeDom.Compiler;
+
 namespace BerryUI.FNA.FreeType;
 
+[GeneratedCode("ClangSharp", "22.1.8.0")]
 public unsafe partial struct FT_FaceRec
 {
     [NativeTypeName("FT_Long")]
@@ -32,7 +35,7 @@ public unsafe partial struct FT_FaceRec
     public int num_charmaps;
 
     [NativeTypeName("FT_CharMap *")]
-    public FT_CharMapRec** charmaps;
+    public unsafe FT_CharMapRec** charmaps;
 
     public FT_Generic generic;
 
@@ -63,22 +66,22 @@ public unsafe partial struct FT_FaceRec
     public short underline_thickness;
 
     [NativeTypeName("FT_GlyphSlot")]
-    public FT_GlyphSlotRec* glyph;
+    public unsafe FT_GlyphSlotRec* glyph;
 
     [NativeTypeName("FT_Size")]
-    public FT_SizeRec* size;
+    public unsafe FT_SizeRec* size;
 
     [NativeTypeName("FT_CharMap")]
-    public FT_CharMapRec* charmap;
+    public unsafe FT_CharMapRec* charmap;
 
     public unsafe FT_Driver driver;
 
     public unsafe FT_Memory memory;
 
     [NativeTypeName("FT_Stream")]
-    public FT_StreamRec* stream;
+    public unsafe FT_StreamRec* stream;
 
-    public FT_ListRec sizes_list;
+    public unsafe FT_ListRec sizes_list;
 
     public FT_Generic autohint;
 

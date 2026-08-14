@@ -1,6 +1,9 @@
+using System.CodeDom.Compiler;
+
 namespace BerryUI.FNA.FreeType;
 
 [NativeTypeName("unsigned int")]
+[GeneratedCode("ClangSharp", "22.1.8.0")]
 public enum FT_Encoding : uint
 {
     NONE = (((uint)((byte)(0)) << 24) | ((uint)((byte)(0)) << 16) | ((uint)((byte)(0)) << 8) | (uint)((byte)(0))),

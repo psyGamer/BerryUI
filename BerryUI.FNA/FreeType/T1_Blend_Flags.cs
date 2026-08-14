@@ -1,0 +1,24 @@
+using System.CodeDom.Compiler;
+
+namespace BerryUI.FNA.FreeType;
+
+[NativeTypeName("unsigned int")]
+[GeneratedCode("ClangSharp", "22.1.8.0")]
+public enum T1_Blend_Flags : uint
+{
+    T1_BLEND_UNDERLINE_POSITION = 0,
+    T1_BLEND_UNDERLINE_THICKNESS,
+    T1_BLEND_ITALIC_ANGLE,
+    T1_BLEND_BLUE_VALUES,
+    T1_BLEND_OTHER_BLUES,
+    T1_BLEND_STANDARD_WIDTH,
+    T1_BLEND_STANDARD_HEIGHT,
+    T1_BLEND_STEM_SNAP_WIDTHS,
+    T1_BLEND_STEM_SNAP_HEIGHTS,
+    T1_BLEND_BLUE_SCALE,
+    T1_BLEND_BLUE_SHIFT,
+    T1_BLEND_FAMILY_BLUES,
+    T1_BLEND_FAMILY_OTHER_BLUES,
+    T1_BLEND_FORCE_BOLD,
+    T1_BLEND_MAX,
+}

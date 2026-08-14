@@ -1,7 +1,6 @@
 using BerryUI.Render;
 using BerryUI.Util;
 using System;
-using System.IO;
 
 namespace BerryUI;
 
@@ -21,13 +20,16 @@ public interface IBackend : IDisposable {
         Widget? RootWidget { get; set; }
     }
 
-    interface IFontFamily {
+    interface IFont {
         /// Handle which uniquely identifies this font family inside the backend.
-        ResourceHandle<FontFamily> Handle { get; }
+        ResourceHandle<Font> Handle { get; }
     }
-    interface IFontFace {
-        /// Handle which uniquely identifies this font face inside the backend.
-        ResourceHandle<FontFace> Handle { get; }
+    interface ITextBlob {
+        /// Handle which uniquely identifies this text blob inside the backend.
+        ResourceHandle<TextBlob> Handle { get; }
+
+        /// Minimal bounding box which contains all glyphs inside this blob
+        USize Bounds { get; }
     }
 
     /// Creates a new window alongside the existing main window.
@@ -43,18 +45,21 @@ public interface IBackend : IDisposable {
     /// Destroys a previously created texture.
     void DestroyTexture(ResourceHandle<Texture> handle);
 
-    /// Creates a new font family.
-    ResourceHandle<FontFamily> CreateFontFamily(byte[] data);
-    /// Destroys a previously created font family.
-    /// All font faces created with this family need to be destroyed beforehand.
-    void DestroyFontFamily(ResourceHandle<FontFamily> handle);
-    /// Retrieves the font family associated with the handle from the backend.
-    IFontFamily GetFontFamily(ResourceHandle<FontFamily> handle);
+    /// Creates a new font.
+    ResourceHandle<Font> CreateFont(byte[] data);
+    /// Destroys a previously created font.
+    /// All text blobs created with this font need to be destroyed beforehand.
+    void DestroyFont(ResourceHandle<Font> handle);
+    /// Retrieves the font associated with the handle from the backend.
+    IFont GetFont(ResourceHandle<Font> handle);
 
-    /// Creates a new font face.
-    ResourceHandle<FontFace> CreateFontFace(ResourceHandle<FontFamily> family, float size);
-    /// Destroys a previously created font face.
-    void DestroyFontFace(ResourceHandle<FontFace> handle);
-    /// Retrieves the font face associated with the handle from the backend.
-    IFontFace GetFontFace(ResourceHandle<FontFace> handle);
+    /// Creates a simple new text blob.
+    /// The provided <see cref="maxWidth"/> is use for wrapping the text onto new lines.
+    /// The text data is copied internally and therefore doesn't need to stay valid after this call.
+    ResourceHandle<TextBlob> CreateSimpleTextBlob(ResourceHandle<Font> font, uint pixelSize, ReadOnlySpan<char> text, float maxWidth);
+
+    /// Destroys a previously created text blob.
+    void DestroyTextBlob(ResourceHandle<TextBlob> handle);
+    /// Retrieves the text blob associated with the handle from the backend.
+    ITextBlob GetTextBlob(ResourceHandle<TextBlob> handle);
 }

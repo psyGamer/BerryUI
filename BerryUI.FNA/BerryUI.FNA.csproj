@@ -1,18 +1,26 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk" InitialTargets="ValidateFNALibs">
 
     <PropertyGroup>
-        <TargetFramework>net8.0</TargetFramework>
+        <TargetFramework>net10.0</TargetFramework>
         <LangVersion>latest</LangVersion>
         <Nullable>enable</Nullable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
     </PropertyGroup>
 
     <ItemGroup>
+        <!-- Only compile our own sources -->
         <Compile Remove="**"/>
         <Compile Include=".\*.cs"/>
         <Compile Include=".\FreeType\*.cs"/>
+        
+        <!-- Include required content (except for shader sources) -->
+        <Content Include="Assets\**" CopyToOutputDirectory="PreserveNewest"/>
+        <Content Remove="Assets\**\*.fx"/>
 
         <ProjectReference Include="..\BerryUI\BerryUI.csproj"/>
+        <ProjectReference Include="..\BerryUI.SourceGen\BerryUI.SourceGen.csproj" OutputItemType="Analyzer" Private="false" PrivateAssets="All"/>
         <Compile Include="..\BerryUI\GlobalUsings.cs"/>
 
         <ProjectReference Include="FNA\FNA.Core.csproj"/>
@@ -25,6 +33,30 @@
             Text="'runtimes' directory not found! Run './fetch-fnalibs.sh' to download the latest native libraries."/>
     </Target>
 
+    <Target Name="GenerateDebugBuildInfo" Condition="'$(Configuration)' == 'Debug'" BeforeTargets="BeforeCompile">
+        <PropertyGroup>
+            <DebugBuildInfoCode>
+                <![CDATA[
+namespace BerryUI.FNA;
+
+public static class DebugBuildInfo
+{
+    public const string ProjectPath = "$(MSBuildProjectDirectory)";
+}
+                ]]>
+            </DebugBuildInfoCode>
+        </PropertyGroup>
+
+        <WriteLinesToFile
+            File="$(IntermediateOutputPath)DebugBuildInfo.g.cs"
+            Lines="$([MSBuild]::Escape($(DebugBuildInfoCode)))"
+            Overwrite="true" />
+
+        <ItemGroup>
+            <Compile Include="$(IntermediateOutputPath)DebugBuildInfo.g.cs" />
+        </ItemGroup>
+    </Target>
+    
     <PropertyGroup>
         <!-- Zig doesn't need separate -musl variants; it's libc is fully static -->
         <_ZigToolsetPackageName>Vezel.Zig.Toolsets.$([System.String]::Copy($(NETCoreSdkPortableRuntimeIdentifier)).Replace('-musl', ''))</_ZigToolsetPackageName>
@@ -42,6 +74,10 @@
     </ItemGroup>
     <ItemGroup>
       <Folder Include="native\zig-out\lib\" />
+    </ItemGroup>
+    <ItemGroup>
+      <ClCompile Include="Assets\BerryUI.FNA\Effects\Glyph.fx" />
+      <ClCompile Include="Assets\BerryUI.FNA\Effects\Sprite.fx" />
     </ItemGroup>
 
     <Import Project="$(_ZigToolsetPropsPath)" Condition="Exists($(_ZigToolsetPropsPath))" />
