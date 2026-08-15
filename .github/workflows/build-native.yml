@@ -14,14 +14,13 @@ env:
   ZLIB_VERSION: 1.3.1
   LIBPNG_VERSION: 1.6.58
   FREETYPE_VERSION: 2.14.3
-  EXPAT_VERSION: 2.8.3
-  FONTCONFIG_VERSION: 2.18.3
+  GRAPHITE2_VERSION: 1.3.15
+  HARFBUZZ_VERSION: 14.3.1
   SDL3_VERSION: 3.4.14
   FNA_VERSION: 26.08
-  MOLTENVK_VERSION: 1.4.2
-  VULKAN_VERSION: 1.4.357.0
   
-  BUILD_TYPE: Release
+  MESON_BUILD_TYPE: release
+  CMAKE_BUILD_TYPE: Release
 
 jobs:
   build-native:
@@ -33,31 +32,46 @@ jobs:
             platform: windows
             msys2_system: mingw32
             msys2_env: i686
-            cmake_flags: --verbose --parallel
+            # Avoid dependency on Visual C++ Redistributable
+            cmake_flags: >-
+              -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>"
+            meson_flags: >-
+              -Db_vscrt=static_from_buildtype
 
           - name: Windows x64
             os: windows-latest
             platform: windows
             msys2_system: mingw64
             msys2_env: x86_64
-            cmake_flags: --verbose --parallel
+            # Avoid dependency on Visual C++ Redistributable
+            cmake_flags: >-
+              -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>"
+            meson_flags: >-
+              -Db_vscrt=static_from_buildtype
 
           - name: Linux x64
             os: ubuntu-latest
             platform: linux
-            container: debian:buster # Required for GLIBC v2.28
-            cmake_flags:
+            # Use musl to avoid dependency on modern glibc version
+            container: alpine:latest
+            cmake_flags: >-
+              -DCMAKE_EXE_LINKER_FLAGS="-Wl,--as-needed"
+              -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--as-needed"
+              -DCMAKE_C_STANDARD_LIBRARIES="/usr/lib/libc.a -lgcc"
+            meson_flags: >-
+              -Db_staticpic=true
+              -Dc_link_args="-Wl,--as-needed /usr/lib/libc.a -lgcc"
 
           - name: macOS x64
             os: macos-15-intel
             platform: macos
-            cmake_flags: --verbose --parallel
 
     name: Native Libraries (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
 
     env:
+      # Keep support for old macOS versions
       MACOSX_DEPLOYMENT_TARGET: 10.12
 
     defaults:
@@ -65,14 +79,6 @@ jobs:
         shell: sh
 
     steps:
-      - name: Install Git and cURL (Linux)
-        if: ${{ matrix.platform == 'linux' }}
-        run: |
-          # Debian buster is now EOL, need to set APT to use the package archive.
-          sed -i s/deb.debian.org/archive.debian.org/g /etc/apt/sources.list
-          apt-get update
-          apt-get install -y git curl ca-certificates
-
       # Setup
       - name: Set up MSVC (Windows)
         uses: ilammy/msvc-dev-cmd@v1
@@ -80,17 +86,10 @@ jobs:
         with:
           arch: ${{ matrix.msys2_env == 'x86_64' && 'x64' || 'x86' }}
 
-      - name: Setup CMake (Windows)
-        uses: jwlawson/actions-setup-cmake@master
+      # See https://github.com/ilammy/msvc-dev-cmd#caveats
+      - name: Remove GNU link.exe (Windows)
         if: ${{ matrix.platform == 'windows' }}
-
-      - name: Set up Ninja (Windows)
-        uses: turtlesec-no/get-ninja@main
-        if: ${{ matrix.platform == 'windows' }}
-
-      - name: Set up NASM (Windows)
-        uses: ilammy/setup-nasm@v1
-        if: ${{ matrix.platform == 'windows' }}
+        run: rm /usr/bin/link
 
       - name: Set up MSYS2 (Windows)
         uses: msys2/setup-msys2@v2
@@ -101,49 +100,25 @@ jobs:
             mingw-w64-${{ matrix.msys2_env }}-cc
             mingw-w64-${{ matrix.msys2_env }}-make
 
+      - name: Set up Python (Windows)
+        uses: actions/setup-python@v5
+        if: ${{ matrix.platform == 'windows' }}
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies (Windows)
+        if: ${{ matrix.platform == 'windows' }}
+        run: |
+          python -m pip install cmake meson ninja
+          choco install pkgconfiglite -y
+      
       - name: Install dependencies (macOS)
         if: ${{ matrix.platform == 'macos' }}
-        run: |
-          # SDL3 dependencies
-          brew install ninja
+        run: brew install meson
 
       - name: Install dependencies (Linux)
         if: ${{ matrix.platform == 'linux' }}
-        run: |
-          # SDL3 dependencies (https://github.com/libsdl-org/SDL/blob/main/docs/README-linux.md)
-          apt-get install -y build-essential make \
-              pkg-config cmake ninja-build gnome-desktop-testing libasound2-dev libpulse-dev \
-              libaudio-dev libfribidi-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
-              libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
-              libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev \
-              libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev libudev-dev libthai-dev libusb-1.0-0-dev
-          # FontConfig dependencies
-          apt-get install -y gperf libtool gettext autopoint
-          
-          # Setup Debian Bullseye PPA for newer CMake and Wayland version
-          echo "deb http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.list
-          echo "deb http://security.debian.org/debian-security bullseye-security main" >> /etc/apt/sources.list
-          echo "deb http://archive.debian.org/debian bullseye-backports main" >> /etc/apt/sources.list
-          cat <<EOF > /etc/apt/preferences.d/bullseye
-          Package: *
-          Pin: release n=bullseye
-          Pin-Priority: 100
-          EOF
-          
-          apt-get update
-          apt-get install -y -t bullseye cmake libwayland-dev libdecor-0-dev
-          
-          # Setup Debian Trixie PPA for even newer autoconf version
-          echo "deb http://deb.debian.org/debian trixie main" >> /etc/apt/sources.list
-          echo "deb http://security.debian.org/debian-security trixie-security main" >> /etc/apt/sources.list
-          cat <<EOF > /etc/apt/preferences.d/trixie
-          Package: *
-          Pin: release n=bullseye
-          Pin-Priority: 200
-          EOF
-          
-          apt-get update
-          apt-get install -y -t trixie autoconf
+        run: apk add --no-cache musl-dev g++ make cmake ninja meson pkgconfig git curl
       
       - name: Create install prefix
         run: |
@@ -157,14 +132,23 @@ jobs:
           tar xzf zlib-${{ env.ZLIB_VERSION }}.tar.gz
           cd zlib-${{ env.ZLIB_VERSION }}
           
-          cmake -B build -G Ninja \
-            -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          # Avoid installing a shared library
+          if [ "x${{ runner.os }}" = "xmacOS" ]; then
+            sed -i'' -e 's/install(TARGETS zlib zlibstatic/install(TARGETS zlibstatic/' CMakeLists.txt
+          else
+            sed -i 's/install(TARGETS zlib zlibstatic/install(TARGETS zlibstatic/' CMakeLists.txt
+          fi
           
-          cmake --build build --config ${{ env.BUILD_TYPE }} ${{ matrix.cmake_flags }}
-          cmake --install build --config ${{ env.BUILD_TYPE }}
+          cmake -B build -G Ninja \
+            -DINSTALL_PKGCONFIG_DIR=${{ env.PREFIX }}/lib/pkgconfig \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_PREFIX_PATH=${{ env.PREFIX }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+             ${{ matrix.cmake_flags }}
+          
+          cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }}
+          cmake --install build --config ${{ env.CMAKE_BUILD_TYPE }}
           
       # libpng
       - name: Build libpng
@@ -176,13 +160,14 @@ jobs:
           cmake -B build -G Ninja \
             -DPNG_SHARED=OFF \
             -DPNG_STATIC=ON \
-            -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_PREFIX_PATH=${{ env.PREFIX }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+             ${{ matrix.cmake_flags }}
           
-          cmake --build build --config ${{ env.BUILD_TYPE }} ${{ matrix.cmake_flags }}
-          cmake --install build --config ${{ env.BUILD_TYPE }}
+          cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }}
+          cmake --install build --config ${{ env.CMAKE_BUILD_TYPE }}
 
       # FreeType
       - name: Build FreeType
@@ -192,82 +177,148 @@ jobs:
           cd freetype-${{ env.FREETYPE_VERSION }}
           
           cmake -B build -G Ninja \
+            -DFT_DISABLE_BZIP2=TRUE \
+            -DFT_DISABLE_BROTLI=TRUE \
             -DBUILD_SHARED_LIBS=ON \
-            -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" \
+            -DCMAKE_PREFIX_PATH=${{ env.PREFIX }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+             ${{ matrix.cmake_flags }}
           
-          cmake --build build --config ${{ env.BUILD_TYPE }} ${{ matrix.cmake_flags }}
-          cmake --install build --config ${{ env.BUILD_TYPE }}
+          cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }}
+          cmake --install build --config ${{ env.CMAKE_BUILD_TYPE }}
 
-      # Expat
-      - name: Build Expat (Linux)
-        if: ${{ matrix.platform == 'linux' }}
+      # Graphite2
+      - name: Build Graphite2
         run: |
-          curl -O -L https://github.com/libexpat/libexpat/releases/download/R_$(echo ${{ env.EXPAT_VERSION }} | sed 's/\./_/g')/expat-${{ env.EXPAT_VERSION }}.tar.gz
-          tar xzf expat-${{ env.EXPAT_VERSION }}.tar.gz
-          cd expat-${{ env.EXPAT_VERSION }}
+          curl -O -L https://github.com/silnrsi/graphite/releases/download/${{ env.GRAPHITE2_VERSION }}/graphite2-${{ env.GRAPHITE2_VERSION }}.tgz
+          tar xzf graphite2-${{ env.GRAPHITE2_VERSION }}.tgz
+          cd graphite2-${{ env.GRAPHITE2_VERSION }}
           
           cmake -B build -G Ninja \
-            -DEXPAT_SHARED_LIBS=OFF \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DGRAPHITE2_NFILEFACE=ON \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_PREFIX_PATH=${{ env.PREFIX }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+             ${{ matrix.cmake_flags }}
           
-          cmake --build build --config ${{ env.BUILD_TYPE }} ${{ matrix.cmake_flags }}
-          cmake --install build --config ${{ env.BUILD_TYPE }}
+          cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }}
+          cmake --install build --config ${{ env.CMAKE_BUILD_TYPE }}
 
-      # FontConfig
-      - name: Build FontConfig (Linux)
-        if: ${{ matrix.platform == 'linux' }}
+      - name: Create pkg-config entries (Windows)
+        if: ${{ matrix.platform == 'windows' }}
         run: |
-          curl -O -L https://gitlab.freedesktop.org/fontconfig/fontconfig/-/archive/${{ env.FONTCONFIG_VERSION }}/fontconfig-${{ env.FONTCONFIG_VERSION }}.tar.gz
-          tar xzf fontconfig-${{ env.FONTCONFIG_VERSION }}.tar.gz
-          cd fontconfig-${{ env.FONTCONFIG_VERSION }}
-          
-          ./autogen.sh \
-            --prefix=${{ env.PREFIX }} \
-            --enable-shared \
-            --disable-static \
-            PKG_CONFIG_PATH="${{ env.PREFIX }}/lib/pkgconfig" \
-            LDFLAGS="-Wl,-rpath,${{ env.PREFIX }}/lib"
-          
-          make install -j$(nproc)
+          WIN_PREFIX="$(cygpath -w "${{ env.PREFIX }}" | sed 's#\\#/#g')"
 
-      # kb_text_shape
-      - name: Build kb_text_shape
+          # zlib
+          cat > "${{ env.PREFIX }}/lib/pkgconfig/zlib.pc" <<EOF
+          prefix=$WIN_PREFIX
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include
+
+          Name: zlib
+          Description: zlib compression library
+          Version: 1.3.1
+
+          Libs: "\${libdir}/zlibstatic.lib"
+          Cflags: -I"\${includedir}"
+          EOF
+
+          # libpng
+          cat > "${{ env.PREFIX }}/lib/pkgconfig/libpng.pc" <<EOF
+          prefix=$WIN_PREFIX
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include/libpng16
+
+          Name: libpng
+          Description: Loads and saves PNG files
+          Version: 1.6.58
+          Requires.private: zlib
+          Libs: "\${libdir}/libpng16_static.lib"
+          Libs.private: "\${libdir}/zlibstatic.lib"
+          Cflags: -I"\${includedir}"
+          EOF
+          
+          # Graphite2
+          cat > "${{ env.PREFIX }}/lib/pkgconfig/graphite2.pc" <<EOF
+          prefix=$WIN_PREFIX
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include
+
+          Name: Graphite2
+          Description: Font rendering engine for Complex Scripts
+          Version: 3.3.1
+          Libs: "\${libdir}/graphite2.lib"
+          Cflags: -I"\${includedir}" -DGRAPHITE2_STATIC
+          EOF
+
+      # HarfBuzz
+      - name: Build HarfBuzz
         run: |
-          git clone https://github.com/JimmyLefevre/kb.git
-          cd kb
-          git checkout b07373ded395b61d33a290181b957994db8edcfb # v2.25
-          
-          echo "#define KB_TEXT_SHAPE_IMPLEMENTATION" > kb_text_shape.c
-          echo "#include <kb_text_shape.h>"           > kb_text_shape.c
-          
-          if [ "x${{ runner.os }}" = "xWindows" ]; then
-            WIN_PREFIX=$(cygpath -w "${{ env.PREFIX }}")
-            cl -LD -MT -O2 -I. kb_text_shape.c -Fe:$WIN_PREFIX/bin/kb.dll
-          elif [ "x${{ runner.os }}" = "xmacOS" ]; then
-            cc -shared -fPIC -O2 -I. kb_text_shape.c -o ${{ env.PREFIX }}/lib/libkb.dylib
-          elif [ "x${{ runner.os }}" = "xLinux" ]; then
-            cc -shared -fPIC -O2 -I. kb_text_shape.c -o ${{ env.PREFIX }}/lib/libkb.so
+          curl -O -L https://github.com/harfbuzz/harfbuzz/releases/download/${{ env.HARFBUZZ_VERSION }}/harfbuzz-${{ env.HARFBUZZ_VERSION }}.tar.xz
+          tar xJf harfbuzz-${{ env.HARFBUZZ_VERSION }}.tar.xz
+          cd harfbuzz-${{ env.HARFBUZZ_VERSION }}
+
+          # Additional libraries may be enabled as needed
+          meson setup build \
+            --prefix=${{ env.PREFIX }}  \
+            --pkg-config-path ${{ env.PREFIX }}/lib/pkgconfig \
+            --prefer-static \
+            -Dtests=disabled \
+            -Dutilities=disabled \
+            -Draster=disabled \
+            -Dvector=disabled \
+            -Dgpu=disabled \
+            -Dsubset=disabled \
+            -Dglib=disabled \
+            -Dgobject=disabled \
+            -Dcairo=disabled \
+            -Dicu=disabled \
+            -Dgraphite2=enabled \
+            -Dfreetype=enabled \
+            -Dbuildtype=${{ env.MESON_BUILD_TYPE }} \
+             ${{ matrix.meson_flags }}
+
+          ninja -C build install
+
+          if [ "x${{ runner.os }}" = "xmacOS" ]; then
+            # Fix Meson embedding an absolute ID path
+            install_name_tool -id "@rpath/libharfbuzz.0.dylib" ${{ env.PREFIX }}/lib/libharfbuzz.0.dylib
           fi
+
           
       # SDL3
+      - name: Install SDL3 dependencies (Linux)
+        if: ${{ matrix.platform == 'linux' }}
+        run: |
+          # See https://gitlab.alpinelinux.org/alpine/aports/-/blob/master/community/sdl3/APKBUILD#L10-31
+          apk add --no-cache \
+            alsa-lib-dev eudev-dev jack-dev libdecor-dev libsamplerate-dev libusb-dev \
+            libx11-dev libxcursor-dev libxext-dev libxkbcommon-dev libxrandr-dev libxrender-dev libxscrnsaver-dev libxtst-dev \
+            pipewire-dev pulseaudio-dev samurai wayland-dev wayland-protocols
+      
       - name: Build SDL3
         run: |
-          git clone --recursive --depth=1 https://github.com/libsdl-org/SDL.git --branch release-${{ env.SDL3_VERSION }}
-          cd SDL
+          curl -O -L https://github.com/libsdl-org/SDL/releases/download/release-${{ env.SDL3_VERSION }}/SDL3-${{ env.SDL3_VERSION }}.tar.gz
+          tar xzf SDL3-${{ env.SDL3_VERSION }}.tar.gz
+          cd SDL3-${{ env.SDL3_VERSION }}
           
           cmake -B build -G Ninja \
             -DSDL_VENDOR_INFO="GitHub Workflow" \
             -DSDL_CMAKE_DEBUG_POSTFIX="" \
             -DSDL_FORCE_STATIC_VCRT=ON \
+            -DCMAKE_PREFIX_PATH=${{ env.PREFIX }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+             ${{ matrix.cmake_flags }}
           
-          cmake --build build --config ${{ env.BUILD_TYPE }} ${{ matrix.cmake_flags }}
-          cmake --install build --config ${{ env.BUILD_TYPE }}
+          cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }}
+          cmake --install build --config ${{ env.CMAKE_BUILD_TYPE }}
       
       # FNA3D
       - name: Build FNA3D
@@ -281,12 +332,13 @@ jobs:
           fi
           
           cmake -B build -G Ninja \
-            -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" \
+            -DCMAKE_PREFIX_PATH=${{ env.PREFIX }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+             ${{ matrix.cmake_flags }}
           
-          cmake --build build --config ${{ env.BUILD_TYPE }} ${{ matrix.cmake_flags }}
-          cmake --install build --config ${{ env.BUILD_TYPE }}
+          cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }}
+          cmake --install build --config ${{ env.CMAKE_BUILD_TYPE }}
       
       # FAudio
       - name: Build FAudio
@@ -300,12 +352,13 @@ jobs:
           fi
           
           cmake -B build -G Ninja \
-            -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded$<$<CONFIG:Debug>:Debug>" \
+            -DCMAKE_PREFIX_PATH=${{ env.PREFIX }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.PREFIX }} \
-            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+             ${{ matrix.cmake_flags }}
           
-          cmake --build build --config ${{ env.BUILD_TYPE }} ${{ matrix.cmake_flags }}
-          cmake --install build --config ${{ env.BUILD_TYPE }}
+          cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }}
+          cmake --install build --config ${{ env.CMAKE_BUILD_TYPE }}
 
       # Theorafile
       - name: Fetch Theorafile
@@ -317,46 +370,22 @@ jobs:
         shell: msys2 {0}
         run: mingw32-make
 
-      - name: Build Theorafile (macOS & Linux)
-        if: ${{ matrix.platform != 'windows' }}
+      - name: Build Theorafile (macOS)
+        if: ${{ matrix.platform == 'macos' }}
         working-directory: Theorafile
         run: make
-      
-      # MoltenVK
-      - name: Build MoltenVK (macOS)
-        if: ${{ matrix.platform == 'macos' }}
-        run: |
-          git clone --recursive --depth=1 https://github.com/KhronosGroup/MoltenVK.git --branch v${{ env.MOLTENVK_VERSION }}
-          cd MoltenVK
+        
+      - name: Build Theorafile (Linux)
+        if: ${{ matrix.platform == 'linux' }}
+        working-directory: Theorafile
+        run: make LDFLAGS="/usr/lib/libc.a -lgcc"
 
-          ./fetchDependencies --macos -v
-          make macos
-
-      - name: Build Vulkan Loader (macOS)
-        if: ${{ matrix.platform == 'macos' }}
-        run: |
-          git clone --recursive --depth=1 https://github.com/KhronosGroup/Vulkan-Headers.git --branch vulkan-sdk-${{ env.VULKAN_VERSION }}
-          git clone --recursive --depth=1 https://github.com/KhronosGroup/Vulkan-Loader.git --branch vulkan-sdk-${{ env.VULKAN_VERSION }}
-          cd Vulkan-Loader
-
-          mkdir -p build
-          cd build
-
-          cmake .. \
-            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
-            -DUPDATE_DEPS=ON \
-            -DVULKAN_HEADERS_INSTALL_DIR="${{ github.workspace }}/Vulkan-Headers" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET
-
-          make
-      
       # Upload
       - name: Copy binaries (Windows)
         if: ${{ matrix.platform == 'windows' }}
         run: |
           cp ${{ env.PREFIX }}/bin/freetype.dll freetype.dll
-          cp ${{ env.PREFIX }}/bin/kb.dll kb.dll
+          cp ${{ env.PREFIX }}/bin/harfbuzz.dll harfbuzz.dll
           cp ${{ env.PREFIX }}/bin/SDL3.dll SDL3.dll
           cp ${{ env.PREFIX }}/bin/FNA3D.dll FNA3D.dll
           cp ${{ env.PREFIX }}/bin/FAudio.dll FAudio.dll
@@ -365,20 +394,18 @@ jobs:
       - name: Copy binaries (macOS)
         if: ${{ matrix.platform == 'macos' }}
         run: |
-          cp ${{ env.PREFIX }}/lib/libfreetype.dylib libfreetype.dylib
-          cp ${{ env.PREFIX }}/lib/libkb.dylib libkb.dylib
+          cp ${{ env.PREFIX }}/lib/libfreetype.6.dylib libfreetype.6.dylib
+          cp ${{ env.PREFIX }}/lib/libharfbuzz.0.dylib libharfbuzz.0.dylib
           cp ${{ env.PREFIX }}/lib/libSDL3.dylib libSDL3.dylib
           cp ${{ env.PREFIX }}/lib/libFNA3D.0.dylib libFNA3D.0.dylib
           cp ${{ env.PREFIX }}/lib/libFAudio.0.dylib libFAudio.0.dylib
           cp Theorafile/libtheorafile.dylib libtheorafile.dylib
-          cp MoltenVK/Package/Release/MoltenVK/dylib/macOS/libMoltenVK.dylib libMoltenVK.dylib
-          cp Vulkan-Loader/build/loader/libvulkan.1.dylib libvulkan.1.dylib
 
       - name: Copy binaries (Linux)
         if: ${{ matrix.platform == 'linux' }}
         run: |
-          cp ${{ env.PREFIX }}/lib/libfreetype.so libfreetype.so
-          cp ${{ env.PREFIX }}/lib/libkb.so libkb.so
+          cp ${{ env.PREFIX }}/lib/libfreetype.so.6 libfreetype.so.6
+          cp ${{ env.PREFIX }}/lib/libharfbuzz.so.0 libharfbuzz.so.0
           cp ${{ env.PREFIX }}/lib/libSDL3.so.0 libSDL3.so.0
           cp ${{ env.PREFIX }}/lib/libFNA3D.so.0 libFNA3D.so.0
           cp ${{ env.PREFIX }}/lib/libFAudio.so.0 libFAudio.so.0
@@ -391,7 +418,7 @@ jobs:
           name: native-windows-${{ matrix.msys2_env }}
           path: |
             freetype.dll
-            kb.dll
+            harfbuzz.dll
             SDL3.dll
             FNA3D.dll
             FAudio.dll
@@ -403,14 +430,12 @@ jobs:
         with:
           name: native-macos-x86_64
           path: |
-            libfreetype.dylib
-            libkb.dylib
-            libSDL3.dylib
+            libfreetype.6.dylib
+            libharfbuzz.0.dylib
+            libSDL3.0.dylib
             libFNA3D.0.dylib
             libFAudio.0.dylib
             libtheorafile.dylib
-            libMoltenVK.dylib
-            libvulkan.1.dylib
 
       - name: Upload Artifacts (Linux)
         uses: actions/upload-artifact@v7
@@ -418,8 +443,8 @@ jobs:
         with:
           name: native-linux-x86_64
           path: |
-            libfreetype.so
-            libkb.so
+            libfreetype.so.6
+            libharfbuzz.so.0
             libSDL3.so.0
             libFNA3D.so.0
             libFAudio.so.0
